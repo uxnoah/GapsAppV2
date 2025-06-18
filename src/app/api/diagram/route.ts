@@ -5,17 +5,8 @@ import { GapsDiagram, GapsItem } from '@/lib/types'
 // For now, we'll use a simple in-memory store
 let currentDiagram: GapsDiagram = {
   id: 'demo-diagram',
-  title: 'GAPS Diagram',
-  items: [
-    { id: '1', text: 'In progress', section: 'status', order: 0, createdAt: new Date(), updatedAt: new Date() },
-    { id: '2', text: 'On track', section: 'status', order: 1, createdAt: new Date(), updatedAt: new Date() },
-    { id: '3', text: 'Finish project', section: 'goal', order: 0, createdAt: new Date(), updatedAt: new Date() },
-    { id: '4', text: 'Learn new skills', section: 'goal', order: 1, createdAt: new Date(), updatedAt: new Date() },
-    { id: '5', text: 'Need better time management', section: 'analysis', order: 0, createdAt: new Date(), updatedAt: new Date() },
-    { id: '6', text: 'Good team collaboration', section: 'analysis', order: 1, createdAt: new Date(), updatedAt: new Date() },
-    { id: '7', text: 'Work 2 hours daily', section: 'plan', order: 0, createdAt: new Date(), updatedAt: new Date() },
-    { id: '8', text: 'Weekly reviews', section: 'plan', order: 1, createdAt: new Date(), updatedAt: new Date() },
-  ],
+  title: '',
+  items: [],
   createdAt: new Date(),
   updatedAt: new Date(),
   version: 1

@@ -115,9 +115,16 @@ export const GapsCanvas = () => {
     }
   }
 
-  // Load data on component mount
+  // Load data on component mount and set up polling for external updates
   React.useEffect(() => {
     loadDiagramFromAPI()
+    
+    // Poll for updates every 3 seconds to catch external changes (like from Chipp)
+    const interval = setInterval(() => {
+      loadDiagramFromAPI()
+    }, 3000)
+    
+    return () => clearInterval(interval)
   }, [])
 
   // Item management functions
@@ -408,7 +415,7 @@ export const GapsCanvas = () => {
             ) : (
               <h1 
                 ref={titleSpanRef}
-                className="text-2xl font-bold cursor-text text-gray-900"
+                className={`text-2xl font-bold cursor-text ${diagram.title ? 'text-gray-900' : 'text-gray-400'}`}
                 onClick={handleStartMainTitleEditWithPosition}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') handleStartMainTitleEdit()
@@ -417,7 +424,7 @@ export const GapsCanvas = () => {
                 role="button"
                 aria-label="Click to edit diagram title"
               >
-                {diagram.title}
+                {diagram.title || 'Add title here...'}
               </h1>
             )}
           </div>
