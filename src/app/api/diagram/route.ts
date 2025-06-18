@@ -59,24 +59,71 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json()
-    const { title, status, goal, analysis, plan } = body
+    
+    // Support both old format and new two-parameter format
+    let title: string
+    let status: string[]
+    let goal: string[]
+    let analysis: string[]
+    let plan: string[]
 
-    // Validate required fields
-    if (!title || !Array.isArray(status) || !Array.isArray(goal) || 
-        !Array.isArray(analysis) || !Array.isArray(plan)) {
-      return NextResponse.json(
-        { error: 'Invalid request body. Expected title (string) and status, goal, analysis, plan (arrays)' },
-        { status: 400 }
-      )
+    // Check if this is the new two-parameter format
+    if (body.current_state && body.gap_analysis) {
+      // New format: two parameters from Chipp
+      const { current_state, gap_analysis } = body
+      
+      // Parse current_state (can be string or object)
+      let currentStateData
+      if (typeof current_state === 'string') {
+        try {
+          currentStateData = JSON.parse(current_state)
+        } catch {
+          return NextResponse.json(
+            { error: 'Invalid current_state format. Must be valid JSON.' },
+            { status: 400 }
+          )
+        }
+      } else {
+        currentStateData = current_state
+      }
+
+      // Parse gap_analysis (can be string or object)
+      let gapAnalysisData
+      if (typeof gap_analysis === 'string') {
+        try {
+          gapAnalysisData = JSON.parse(gap_analysis)
+        } catch {
+          return NextResponse.json(
+            { error: 'Invalid gap_analysis format. Must be valid JSON.' },
+            { status: 400 }
+          )
+        }
+      } else {
+        gapAnalysisData = gap_analysis
+      }
+
+      // Extract fields from parsed data
+      title = currentStateData?.title || 'GAPS Diagram'
+      status = Array.isArray(currentStateData?.status) ? currentStateData.status : []
+      goal = Array.isArray(currentStateData?.goal) ? currentStateData.goal : []
+      analysis = Array.isArray(gapAnalysisData?.analysis) ? gapAnalysisData.analysis : []
+      plan = Array.isArray(gapAnalysisData?.plan) ? gapAnalysisData.plan : []
+    } else {
+      // Old format: direct fields (for backward compatibility)
+      title = body.title || 'GAPS Diagram'
+      status = Array.isArray(body.status) ? body.status : []
+      goal = Array.isArray(body.goal) ? body.goal : []
+      analysis = Array.isArray(body.analysis) ? body.analysis : []
+      plan = Array.isArray(body.plan) ? body.plan : []
     }
 
     // Generate new items with proper IDs and metadata
     const newItems: GapsItem[] = []
     let idCounter = 1
 
-    // Add status items
+    // Add status items (can be 0 or more)
     status.forEach((text: string, index: number) => {
-      if (text.trim()) {
+      if (typeof text === 'string' && text.trim()) {
         newItems.push({
           id: `status-${idCounter++}`,
           text: text.trim(),
@@ -88,9 +135,9 @@ export async function PUT(request: NextRequest) {
       }
     })
 
-    // Add goal items
+    // Add goal items (can be 0 or more)
     goal.forEach((text: string, index: number) => {
-      if (text.trim()) {
+      if (typeof text === 'string' && text.trim()) {
         newItems.push({
           id: `goal-${idCounter++}`,
           text: text.trim(),
@@ -102,9 +149,9 @@ export async function PUT(request: NextRequest) {
       }
     })
 
-    // Add analysis items
+    // Add analysis items (can be 0 or more)
     analysis.forEach((text: string, index: number) => {
-      if (text.trim()) {
+      if (typeof text === 'string' && text.trim()) {
         newItems.push({
           id: `analysis-${idCounter++}`,
           text: text.trim(),
@@ -116,9 +163,9 @@ export async function PUT(request: NextRequest) {
       }
     })
 
-    // Add plan items
+    // Add plan items (can be 0 or more)
     plan.forEach((text: string, index: number) => {
-      if (text.trim()) {
+      if (typeof text === 'string' && text.trim()) {
         newItems.push({
           id: `plan-${idCounter++}`,
           text: text.trim(),
