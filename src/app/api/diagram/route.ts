@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GapsDiagram, GapsItem } from '@/lib/types'
+import { writeFileSync, readFileSync, existsSync } from 'fs'
+import { join } from 'path'
 
-// Simple in-memory store - works fine for our needs
-let currentDiagram: GapsDiagram = {
+// File path for persistence (Vercel's /tmp directory)
+const DATA_FILE = join(process.cwd(), 'diagram-data.json')
+
+// Default diagram structure
+const defaultDiagram: GapsDiagram = {
   id: 'demo-diagram',
   title: '',
   items: [],
@@ -11,9 +16,44 @@ let currentDiagram: GapsDiagram = {
   version: 1
 }
 
+// Load diagram from file or return default
+const loadDiagram = (): GapsDiagram => {
+  try {
+    if (existsSync(DATA_FILE)) {
+      const data = readFileSync(DATA_FILE, 'utf8')
+      const parsed = JSON.parse(data)
+      console.log('🔄 Loaded diagram from file:', parsed.title, 'with', parsed.items?.length || 0, 'items')
+      return {
+        ...parsed,
+        createdAt: new Date(parsed.createdAt),
+        updatedAt: new Date(parsed.updatedAt)
+      }
+    }
+  } catch (error) {
+    console.error('🔄 Error loading diagram file:', error)
+  }
+  
+  console.log('🔄 Using default empty diagram')
+  return defaultDiagram
+}
+
+// Save diagram to file
+const saveDiagram = (diagram: GapsDiagram): void => {
+  try {
+    writeFileSync(DATA_FILE, JSON.stringify(diagram, null, 2))
+    console.log('💾 Saved diagram to file:', diagram.title, 'with', diagram.items.length, 'items')
+  } catch (error) {
+    console.error('💾 Error saving diagram file:', error)
+  }
+}
+
 // GET /api/diagram - Returns current diagram state
 export async function GET() {
   try {
+    console.log('🔥 GET /api/diagram called at:', new Date().toISOString())
+    
+    const currentDiagram = loadDiagram()
+    
     // Format the response for Chipp AI
     const response = {
       title: currentDiagram.title,
@@ -35,9 +75,10 @@ export async function GET() {
         .map(item => item.text)
     }
 
+    console.log('🔥 Returning GET response:', JSON.stringify(response, null, 2))
     return NextResponse.json(response)
   } catch (error) {
-    console.error('Error fetching diagram:', error)
+    console.error('🔥 Error fetching diagram:', error)
     return NextResponse.json(
       { error: 'Failed to fetch diagram' },
       { status: 500 }
@@ -188,7 +229,8 @@ export async function PUT(request: NextRequest) {
 
     console.log('🔥 Generated', newItems.length, 'items:', newItems.map(i => `${i.section}: ${i.text}`))
 
-    // Update the diagram
+    // Load current diagram and update it
+    const currentDiagram = loadDiagram()
     const updatedDiagram = {
       ...currentDiagram,
       title: title.trim(),
@@ -197,9 +239,9 @@ export async function PUT(request: NextRequest) {
       version: currentDiagram.version + 1
     }
 
-    currentDiagram = updatedDiagram
-    console.log('🔥 Updated diagram. New version:', currentDiagram.version)
-    console.log('🔥 Current diagram now has', currentDiagram.items.length, 'items')
+    saveDiagram(updatedDiagram)
+    console.log('🔥 Updated diagram. New version:', updatedDiagram.version)
+    console.log('🔥 Current diagram now has', updatedDiagram.items.length, 'items')
 
     const response = {
       success: true,
