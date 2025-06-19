@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GapsDiagram, GapsItem } from '@/lib/types'
+import { kv } from '@vercel/kv'
 
-// Simple in-memory store (works for current session)
-let currentDiagram: GapsDiagram = {
+const DIAGRAM_KEY = 'current-diagram'
+
+// Default diagram structure
+const defaultDiagram: GapsDiagram = {
   id: 'demo-diagram',
   title: '',
   items: [],
@@ -11,10 +14,42 @@ let currentDiagram: GapsDiagram = {
   version: 1
 }
 
+// Load diagram from database
+const loadDiagram = async (): Promise<GapsDiagram> => {
+  try {
+    const stored = await kv.get(DIAGRAM_KEY)
+    if (stored) {
+      console.log('📀 Loaded diagram from database:', (stored as any).title, 'with', (stored as any).items?.length || 0, 'items')
+      return {
+        ...(stored as GapsDiagram),
+        createdAt: new Date((stored as any).createdAt),
+        updatedAt: new Date((stored as any).updatedAt)
+      }
+    }
+  } catch (error) {
+    console.error('📀 Error loading from database:', error)
+  }
+  
+  console.log('📀 Using default empty diagram')
+  return defaultDiagram
+}
+
+// Save diagram to database
+const saveDiagram = async (diagram: GapsDiagram): Promise<void> => {
+  try {
+    await kv.set(DIAGRAM_KEY, diagram)
+    console.log('💾 Saved diagram to database:', diagram.title, 'with', diagram.items.length, 'items')
+  } catch (error) {
+    console.error('💾 Error saving to database:', error)
+  }
+}
+
 // GET /api/diagram - Returns current diagram state
 export async function GET() {
   try {
     console.log('🔥 GET /api/diagram called at:', new Date().toISOString())
+    
+    const currentDiagram = await loadDiagram()
     console.log('🔥 Current diagram has', currentDiagram.items.length, 'items')
     
     // Format the response for Chipp AI
@@ -161,8 +196,9 @@ export async function PUT(request: NextRequest) {
 
     console.log('🔥 Generated', newItems.length, 'items:', newItems.map(i => `${i.section}: ${i.text}`))
 
-    // Update the in-memory diagram
-    currentDiagram = {
+    // Load current diagram and update it
+    const currentDiagram = await loadDiagram()
+    const updatedDiagram = {
       ...currentDiagram,
       title: title.trim(),
       items: newItems,
@@ -170,14 +206,17 @@ export async function PUT(request: NextRequest) {
       version: currentDiagram.version + 1
     }
 
-    console.log('🔥 Updated diagram. New version:', currentDiagram.version)
-    console.log('🔥 Current diagram now has', currentDiagram.items.length, 'items')
+    // Save to database
+    await saveDiagram(updatedDiagram)
+    
+    console.log('🔥 Updated diagram. New version:', updatedDiagram.version)
+    console.log('🔥 Current diagram now has', updatedDiagram.items.length, 'items')
 
     const response = {
       success: true,
       message: 'Diagram updated successfully',
       diagram: {
-        title: currentDiagram.title,
+        title: updatedDiagram.title,
         status: newItems.filter(item => item.section === 'status').map(item => item.text),
         goal: newItems.filter(item => item.section === 'goal').map(item => item.text),
         analysis: newItems.filter(item => item.section === 'analysis').map(item => item.text),

@@ -222,17 +222,9 @@ export const GapsCanvas = () => {
     }
   }
 
-  // Load data on component mount and poll for updates
+  // Load data on component mount only (no polling)
   React.useEffect(() => {
     loadDiagramFromAPI()
-    
-    // Poll every 5 seconds to check for updates from Chipp
-    const pollInterval = setInterval(() => {
-      console.log('🔄 Polling for updates from external sources...')
-      loadDiagramFromAPI()
-    }, 5000)
-    
-    return () => clearInterval(pollInterval)
   }, [])
 
   // Item management functions
