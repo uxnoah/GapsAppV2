@@ -48,7 +48,11 @@ export async function GET() {
 // PUT /api/diagram - Updates diagram with new state from Chipp AI
 export async function PUT(request: NextRequest) {
   try {
+    console.log('🔥 PUT /api/diagram called at:', new Date().toISOString())
+    console.log('🔥 Request headers:', Object.fromEntries(request.headers.entries()))
+    
     const body = await request.json()
+    console.log('🔥 Request body received:', JSON.stringify(body, null, 2))
     
     // Support both old format and new two-parameter format
     let title: string
@@ -59,6 +63,7 @@ export async function PUT(request: NextRequest) {
 
     // Check if this is the new two-parameter format
     if (body.current_state && body.gap_analysis) {
+      console.log('🔥 Processing two-parameter format')
       // New format: two parameters from Chipp
       const { current_state, gap_analysis } = body
       
@@ -67,7 +72,9 @@ export async function PUT(request: NextRequest) {
       if (typeof current_state === 'string') {
         try {
           currentStateData = JSON.parse(current_state)
+          console.log('🔥 Parsed current_state from string:', currentStateData)
         } catch {
+          console.log('🔥 ERROR: Invalid current_state format')
           return NextResponse.json(
             { error: 'Invalid current_state format. Must be valid JSON.' },
             { status: 400 }
@@ -75,6 +82,7 @@ export async function PUT(request: NextRequest) {
         }
       } else {
         currentStateData = current_state
+        console.log('🔥 Current_state is object:', currentStateData)
       }
 
       // Parse gap_analysis (can be string or object)
@@ -82,7 +90,9 @@ export async function PUT(request: NextRequest) {
       if (typeof gap_analysis === 'string') {
         try {
           gapAnalysisData = JSON.parse(gap_analysis)
+          console.log('🔥 Parsed gap_analysis from string:', gapAnalysisData)
         } catch {
+          console.log('🔥 ERROR: Invalid gap_analysis format')
           return NextResponse.json(
             { error: 'Invalid gap_analysis format. Must be valid JSON.' },
             { status: 400 }
@@ -90,6 +100,7 @@ export async function PUT(request: NextRequest) {
         }
       } else {
         gapAnalysisData = gap_analysis
+        console.log('🔥 Gap_analysis is object:', gapAnalysisData)
       }
 
       // Extract fields from parsed data
@@ -99,6 +110,7 @@ export async function PUT(request: NextRequest) {
       analysis = Array.isArray(gapAnalysisData?.analysis) ? gapAnalysisData.analysis : []
       plan = Array.isArray(gapAnalysisData?.plan) ? gapAnalysisData.plan : []
     } else {
+      console.log('🔥 Processing old/direct format')
       // Old format: direct fields (for backward compatibility)
       title = body.title || ''
       status = Array.isArray(body.status) ? body.status : []
@@ -106,6 +118,13 @@ export async function PUT(request: NextRequest) {
       analysis = Array.isArray(body.analysis) ? body.analysis : []
       plan = Array.isArray(body.plan) ? body.plan : []
     }
+
+    console.log('🔥 Extracted data:')
+    console.log('  - title:', title)
+    console.log('  - status:', status)
+    console.log('  - goal:', goal)
+    console.log('  - analysis:', analysis)
+    console.log('  - plan:', plan)
 
     // Generate new items with proper IDs and metadata
     const newItems: GapsItem[] = []
@@ -167,6 +186,8 @@ export async function PUT(request: NextRequest) {
       }
     })
 
+    console.log('🔥 Generated', newItems.length, 'items:', newItems.map(i => `${i.section}: ${i.text}`))
+
     // Update the diagram
     const updatedDiagram = {
       ...currentDiagram,
@@ -177,8 +198,10 @@ export async function PUT(request: NextRequest) {
     }
 
     currentDiagram = updatedDiagram
+    console.log('🔥 Updated diagram. New version:', currentDiagram.version)
+    console.log('🔥 Current diagram now has', currentDiagram.items.length, 'items')
 
-    return NextResponse.json({
+    const response = {
       success: true,
       message: 'Diagram updated successfully',
       diagram: {
@@ -188,9 +211,12 @@ export async function PUT(request: NextRequest) {
         analysis: newItems.filter(item => item.section === 'analysis').map(item => item.text),
         plan: newItems.filter(item => item.section === 'plan').map(item => item.text)
       }
-    })
+    }
+
+    console.log('🔥 Returning response:', JSON.stringify(response, null, 2))
+    return NextResponse.json(response)
   } catch (error) {
-    console.error('Error updating diagram:', error)
+    console.error('🔥 ERROR updating diagram:', error)
     return NextResponse.json(
       { error: 'Failed to update diagram' },
       { status: 500 }
