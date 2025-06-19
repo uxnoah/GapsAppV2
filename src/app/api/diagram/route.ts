@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GapsDiagram, GapsItem } from '@/lib/types'
 
-// Since Vercel serverless functions don't persist in-memory data,
-// we need a different approach. For now, let's use a global variable
-// with better initialization to handle cold starts
-let currentDiagram: GapsDiagram | null = null
+// Global state that persists across requests in the same instance
+// In serverless, this will reset on cold starts, but it's better than nothing
+global.diagramState = global.diagramState || null
 
-// Initialize diagram with default empty state
-function initializeDiagram(): GapsDiagram {
-  if (!currentDiagram) {
-    console.log('🚀 Initializing new diagram (cold start)')
-    currentDiagram = {
+function getDiagram(): GapsDiagram {
+  if (!global.diagramState) {
+    console.log('🚀 Creating new diagram state (cold start)')
+    global.diagramState = {
       id: 'demo-diagram',
       title: '',
       items: [],
@@ -19,13 +17,22 @@ function initializeDiagram(): GapsDiagram {
       version: 1
     }
   }
-  return currentDiagram
+  return global.diagramState
+}
+
+function setDiagram(diagram: GapsDiagram): void {
+  global.diagramState = diagram
+  console.log('💾 Updated diagram state:', {
+    title: diagram.title,
+    itemCount: diagram.items.length,
+    version: diagram.version
+  })
 }
 
 // GET /api/diagram - Returns current diagram state
 export async function GET() {
   try {
-    const diagram = initializeDiagram()
+    const diagram = getDiagram()
     console.log('📖 GET request - Current diagram state:', {
       title: diagram.title,
       itemCount: diagram.items.length,
@@ -206,19 +213,21 @@ export async function PUT(request: NextRequest) {
     })
 
     // Update the diagram
-    currentDiagram = {
-      ...currentDiagram,
+    const updatedDiagram = {
+      ...getDiagram(),
       title: title.trim(),
       items: newItems,
       updatedAt: new Date(),
-      version: currentDiagram.version + 1
+      version: getDiagram().version + 1
     }
+
+    setDiagram(updatedDiagram)
 
     return NextResponse.json({
       success: true,
       message: 'Diagram updated successfully',
       diagram: {
-        title: currentDiagram.title,
+        title: updatedDiagram.title,
         status: newItems.filter(item => item.section === 'status').map(item => item.text),
         goal: newItems.filter(item => item.section === 'goal').map(item => item.text),
         analysis: newItems.filter(item => item.section === 'analysis').map(item => item.text),
