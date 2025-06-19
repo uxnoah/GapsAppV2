@@ -122,7 +122,7 @@ export const GapsCanvas = () => {
 
   // Item management functions
   const handleAddItem = (section: GapsSection) => {
-    const newItem = createGapsItem('New item', section)
+    const newItem = createGapsItem('', section)
     const sectionItems = getItemsBySection(diagram.items, section)
     newItem.order = sectionItems.length
     
@@ -132,6 +132,10 @@ export const GapsCanvas = () => {
       updatedAt: new Date(),
       version: prev.version + 1
     }))
+    
+    // Automatically start editing the new item
+    setEditingItemId(newItem.id)
+    setEditText('')
   }
 
   const handleRemoveItem = (itemId: string) => {
