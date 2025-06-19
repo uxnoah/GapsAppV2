@@ -152,9 +152,68 @@ export const GapsCanvas = () => {
         const result = await response.json()
         console.log('🧪 PUT Response:', JSON.stringify(result, null, 2))
         
-        // Reload data from API to see if it persisted
-        console.log('🧪 Reloading data to check persistence...')
-        await loadDiagramFromAPI()
+        // Use the response data directly to update the frontend
+        if (result.success && result.diagram) {
+          console.log('🧪 Using PUT response data to update frontend...')
+          
+          const diagramData = result.diagram
+          const items: GapsItem[] = []
+          let idCounter = 1
+
+          // Convert response data to frontend format
+          diagramData.status?.forEach((text: string, index: number) => {
+            items.push({
+              id: `status-${idCounter++}`,
+              text,
+              section: 'status',
+              order: index,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            })
+          })
+
+          diagramData.goal?.forEach((text: string, index: number) => {
+            items.push({
+              id: `goal-${idCounter++}`,
+              text,
+              section: 'goal',
+              order: index,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            })
+          })
+
+          diagramData.analysis?.forEach((text: string, index: number) => {
+            items.push({
+              id: `analysis-${idCounter++}`,
+              text,
+              section: 'analysis',
+              order: index,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            })
+          })
+
+          diagramData.plan?.forEach((text: string, index: number) => {
+            items.push({
+              id: `plan-${idCounter++}`,
+              text,
+              section: 'plan',
+              order: index,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            })
+          })
+
+          setDiagram(prev => ({
+            ...prev,
+            title: diagramData.title || '',
+            items,
+            updatedAt: new Date()
+          }))
+          
+          console.log('🧪 Frontend updated with', items.length, 'items')
+        }
       } else {
         console.error('🧪 PUT request failed:', response.status, response.statusText)
       }
