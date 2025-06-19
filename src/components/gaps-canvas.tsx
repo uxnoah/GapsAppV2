@@ -125,6 +125,44 @@ export const GapsCanvas = () => {
     }
   }
 
+  // Test function to send sample data to API
+  const sendTestDataToAPI = async () => {
+    try {
+      console.log('🧪 Sending test data to API...')
+      
+      const testData = {
+        title: 'Test Data from Frontend',
+        status: ['Status item 1', 'Status item 2'],
+        goal: ['Goal item 1', 'Goal item 2'], 
+        analysis: ['Analysis item 1', 'Analysis item 2'],
+        plan: ['Plan item 1', 'Plan item 2']
+      }
+      
+      const response = await fetch('/api/diagram', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(testData)
+      })
+      
+      console.log('🧪 PUT Response status:', response.status)
+      
+      if (response.ok) {
+        const result = await response.json()
+        console.log('🧪 PUT Response:', JSON.stringify(result, null, 2))
+        
+        // Reload data from API to see if it persisted
+        console.log('🧪 Reloading data to check persistence...')
+        await loadDiagramFromAPI()
+      } else {
+        console.error('🧪 PUT request failed:', response.status, response.statusText)
+      }
+    } catch (error) {
+      console.error('🧪 Error sending test data:', error)
+    }
+  }
+
   // Load data on component mount only (no polling)
   React.useEffect(() => {
     loadDiagramFromAPI()
@@ -406,13 +444,22 @@ export const GapsCanvas = () => {
         <div className="w-2/3 bg-white rounded-lg shadow-lg p-6 pb-3">
           {/* Title Section - Centered above diagram only */}
           <div className="flex justify-between items-center mb-4">
-            <button
-              onClick={loadDiagramFromAPI}
-              className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
-              title="Refresh from API"
-            >
-              🔄 Refresh
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={loadDiagramFromAPI}
+                className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                title="Refresh from API"
+              >
+                🔄 Refresh
+              </button>
+              <button
+                onClick={sendTestDataToAPI}
+                className="px-3 py-1 text-sm bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
+                title="Send test data to API"
+              >
+                🧪 Test Data
+              </button>
+            </div>
             <div className="flex-1"></div>
           </div>
           <div className="text-center mb-4">
