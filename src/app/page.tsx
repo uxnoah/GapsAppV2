@@ -3,8 +3,10 @@ import { GapsCanvas } from '@/components/gaps-canvas'
 export default function Home() {
   return (
     <main className="min-h-screen bg-gray-100">
-      {/* Debug version marker */}
-      <div className="hidden">DEBUG_VERSION_v2.1</div>
+      {/* Version indicator */}
+      <div className="absolute top-2 right-2 text-xs text-gray-500 bg-white px-2 py-1 rounded">
+        v3.1-debug
+      </div>
       <GapsCanvas />
     </main>
   )
