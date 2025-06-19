@@ -222,14 +222,22 @@ export const GapsCanvas = () => {
     }
   }
 
-  // Load data on component mount only (no polling)
+  // Load data on component mount and poll for updates
   React.useEffect(() => {
     loadDiagramFromAPI()
+    
+    // Poll every 5 seconds to check for updates from Chipp
+    const pollInterval = setInterval(() => {
+      console.log('🔄 Polling for updates from external sources...')
+      loadDiagramFromAPI()
+    }, 5000)
+    
+    return () => clearInterval(pollInterval)
   }, [])
 
   // Item management functions
   const handleAddItem = (section: GapsSection) => {
-    const newItem = createGapsItem('new thought', section)
+    const newItem = createGapsItem('New thought', section)
     const sectionItems = getItemsBySection(diagram.items, section)
     newItem.order = sectionItems.length
     
@@ -242,7 +250,7 @@ export const GapsCanvas = () => {
     
     // Automatically start editing the new item with text selected
     setEditingItemId(newItem.id)
-    setEditText('new thought')
+    setEditText('New thought')
   }
 
   const handleRemoveItem = (itemId: string) => {

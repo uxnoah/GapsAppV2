@@ -100,15 +100,21 @@ export const GapsItemComponent: React.FC<GapsItemProps> = ({
 
   // Set cursor position when input becomes active
   React.useEffect(() => {
-    if (isEditing && inputRef.current && clickPosition !== null) {
+    if (isEditing && inputRef.current) {
       // Small delay to ensure input is fully rendered
       setTimeout(() => {
         if (inputRef.current) {
-          inputRef.current.setSelectionRange(clickPosition, clickPosition)
+          // If text is "New thought", select all text for easy replacement
+          if (editText === 'New thought') {
+            inputRef.current.select()
+          } else if (clickPosition !== null) {
+            // Otherwise, position cursor at click location
+            inputRef.current.setSelectionRange(clickPosition, clickPosition)
+          }
         }
       }, 0)
     }
-  }, [isEditing, clickPosition])
+  }, [isEditing, clickPosition, editText])
 
   // Close context menu when clicking outside
   React.useEffect(() => {
