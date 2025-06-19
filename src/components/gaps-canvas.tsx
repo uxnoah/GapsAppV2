@@ -122,16 +122,9 @@ export const GapsCanvas = () => {
     }
   }
 
-  // Load data on component mount and set up polling for external updates
+  // Load data on component mount only (no polling)
   React.useEffect(() => {
     loadDiagramFromAPI()
-    
-    // Poll for updates every 3 seconds to catch external changes (like from Chipp)
-    const interval = setInterval(() => {
-      loadDiagramFromAPI()
-    }, 3000)
-    
-    return () => clearInterval(interval)
   }, [])
 
   // Item management functions
@@ -405,6 +398,16 @@ export const GapsCanvas = () => {
         {/* GAPS Diagram Section */}
         <div className="w-2/3 bg-white rounded-lg shadow-lg p-6 pb-3">
           {/* Title Section - Centered above diagram only */}
+          <div className="flex justify-between items-center mb-4">
+            <button
+              onClick={loadDiagramFromAPI}
+              className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+              title="Refresh from API"
+            >
+              🔄 Refresh
+            </button>
+            <div className="flex-1"></div>
+          </div>
           <div className="text-center mb-4">
             {editingMainTitle ? (
               <input
