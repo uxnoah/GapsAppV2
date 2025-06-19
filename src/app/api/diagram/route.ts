@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GapsDiagram, GapsItem } from '@/lib/types'
-import { writeFileSync, readFileSync, existsSync } from 'fs'
-import { join } from 'path'
 
-// File path for persistence (Vercel's /tmp directory)
-const DATA_FILE = join(process.cwd(), 'diagram-data.json')
-
-// Default diagram structure
-const defaultDiagram: GapsDiagram = {
+// Simple in-memory store (works for current session)
+let currentDiagram: GapsDiagram = {
   id: 'demo-diagram',
   title: '',
   items: [],
@@ -16,43 +11,11 @@ const defaultDiagram: GapsDiagram = {
   version: 1
 }
 
-// Load diagram from file or return default
-const loadDiagram = (): GapsDiagram => {
-  try {
-    if (existsSync(DATA_FILE)) {
-      const data = readFileSync(DATA_FILE, 'utf8')
-      const parsed = JSON.parse(data)
-      console.log('🔄 Loaded diagram from file:', parsed.title, 'with', parsed.items?.length || 0, 'items')
-      return {
-        ...parsed,
-        createdAt: new Date(parsed.createdAt),
-        updatedAt: new Date(parsed.updatedAt)
-      }
-    }
-  } catch (error) {
-    console.error('🔄 Error loading diagram file:', error)
-  }
-  
-  console.log('🔄 Using default empty diagram')
-  return defaultDiagram
-}
-
-// Save diagram to file
-const saveDiagram = (diagram: GapsDiagram): void => {
-  try {
-    writeFileSync(DATA_FILE, JSON.stringify(diagram, null, 2))
-    console.log('💾 Saved diagram to file:', diagram.title, 'with', diagram.items.length, 'items')
-  } catch (error) {
-    console.error('💾 Error saving diagram file:', error)
-  }
-}
-
 // GET /api/diagram - Returns current diagram state
 export async function GET() {
   try {
     console.log('🔥 GET /api/diagram called at:', new Date().toISOString())
-    
-    const currentDiagram = loadDiagram()
+    console.log('🔥 Current diagram has', currentDiagram.items.length, 'items')
     
     // Format the response for Chipp AI
     const response = {
@@ -95,54 +58,23 @@ export async function PUT(request: NextRequest) {
     const body = await request.json()
     console.log('🔥 Request body received:', JSON.stringify(body, null, 2))
     
-    // Support both old format and new two-parameter format
+    // Support multiple formats from Chipp
     let title: string
     let status: string[]
     let goal: string[]
     let analysis: string[]
     let plan: string[]
 
-    // Check if this is the new two-parameter format
-    if (body.current_state && body.gap_analysis) {
-      console.log('🔥 Processing two-parameter format')
-      // New format: two parameters from Chipp
-      const { current_state, gap_analysis } = body
+    // Check for Chipp's format with "current state" (space) and "gap_analysis"
+    if ((body['current state'] || body.current_state) && body.gap_analysis) {
+      console.log('🔥 Processing Chipp two-parameter format')
       
-      // Parse current_state (can be string or object)
-      let currentStateData
-      if (typeof current_state === 'string') {
-        try {
-          currentStateData = JSON.parse(current_state)
-          console.log('🔥 Parsed current_state from string:', currentStateData)
-        } catch {
-          console.log('🔥 ERROR: Invalid current_state format')
-          return NextResponse.json(
-            { error: 'Invalid current_state format. Must be valid JSON.' },
-            { status: 400 }
-          )
-        }
-      } else {
-        currentStateData = current_state
-        console.log('🔥 Current_state is object:', currentStateData)
-      }
-
-      // Parse gap_analysis (can be string or object)
-      let gapAnalysisData
-      if (typeof gap_analysis === 'string') {
-        try {
-          gapAnalysisData = JSON.parse(gap_analysis)
-          console.log('🔥 Parsed gap_analysis from string:', gapAnalysisData)
-        } catch {
-          console.log('🔥 ERROR: Invalid gap_analysis format')
-          return NextResponse.json(
-            { error: 'Invalid gap_analysis format. Must be valid JSON.' },
-            { status: 400 }
-          )
-        }
-      } else {
-        gapAnalysisData = gap_analysis
-        console.log('🔥 Gap_analysis is object:', gapAnalysisData)
-      }
+      // Handle "current state" (with space) or "current_state" (with underscore)
+      const currentStateData = body['current state'] || body.current_state
+      const gapAnalysisData = body.gap_analysis
+      
+      console.log('🔥 Current state data:', currentStateData)
+      console.log('🔥 Gap analysis data:', gapAnalysisData)
 
       // Extract fields from parsed data
       title = currentStateData?.title || ''
@@ -229,9 +161,8 @@ export async function PUT(request: NextRequest) {
 
     console.log('🔥 Generated', newItems.length, 'items:', newItems.map(i => `${i.section}: ${i.text}`))
 
-    // Load current diagram and update it
-    const currentDiagram = loadDiagram()
-    const updatedDiagram = {
+    // Update the in-memory diagram
+    currentDiagram = {
       ...currentDiagram,
       title: title.trim(),
       items: newItems,
@@ -239,15 +170,14 @@ export async function PUT(request: NextRequest) {
       version: currentDiagram.version + 1
     }
 
-    saveDiagram(updatedDiagram)
-    console.log('🔥 Updated diagram. New version:', updatedDiagram.version)
-    console.log('🔥 Current diagram now has', updatedDiagram.items.length, 'items')
+    console.log('🔥 Updated diagram. New version:', currentDiagram.version)
+    console.log('🔥 Current diagram now has', currentDiagram.items.length, 'items')
 
     const response = {
       success: true,
       message: 'Diagram updated successfully',
       diagram: {
-        title: updatedDiagram.title,
+        title: currentDiagram.title,
         status: newItems.filter(item => item.section === 'status').map(item => item.text),
         goal: newItems.filter(item => item.section === 'goal').map(item => item.text),
         analysis: newItems.filter(item => item.section === 'analysis').map(item => item.text),
