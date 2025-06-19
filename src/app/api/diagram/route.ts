@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GapsDiagram, GapsItem } from '@/lib/types'
-import { kv } from '@vercel/kv'
 
-const DIAGRAM_KEY = 'current-diagram'
+// Global variable that persists during the serverless function lifetime
+let memoryDiagram: GapsDiagram | null = null
 
 // Default diagram structure
 const defaultDiagram: GapsDiagram = {
@@ -14,34 +14,19 @@ const defaultDiagram: GapsDiagram = {
   version: 1
 }
 
-// Load diagram from database
-const loadDiagram = async (): Promise<GapsDiagram> => {
-  try {
-    const stored = await kv.get(DIAGRAM_KEY)
-    if (stored) {
-      console.log('📀 Loaded diagram from database:', (stored as any).title, 'with', (stored as any).items?.length || 0, 'items')
-      return {
-        ...(stored as GapsDiagram),
-        createdAt: new Date((stored as any).createdAt),
-        updatedAt: new Date((stored as any).updatedAt)
-      }
-    }
-  } catch (error) {
-    console.error('📀 Error loading from database:', error)
+// Simple persistent storage using memory + API persistence simulation
+const getDiagram = (): GapsDiagram => {
+  if (!memoryDiagram) {
+    console.log('📀 Initializing new diagram in memory')
+    memoryDiagram = { ...defaultDiagram }
   }
-  
-  console.log('📀 Using default empty diagram')
-  return defaultDiagram
+  console.log('📀 Loaded diagram from memory:', memoryDiagram.title, 'with', memoryDiagram.items?.length || 0, 'items')
+  return memoryDiagram
 }
 
-// Save diagram to database
-const saveDiagram = async (diagram: GapsDiagram): Promise<void> => {
-  try {
-    await kv.set(DIAGRAM_KEY, diagram)
-    console.log('💾 Saved diagram to database:', diagram.title, 'with', diagram.items.length, 'items')
-  } catch (error) {
-    console.error('💾 Error saving to database:', error)
-  }
+const setDiagram = (diagram: GapsDiagram): void => {
+  memoryDiagram = diagram
+  console.log('💾 Saved diagram to memory:', diagram.title, 'with', diagram.items.length, 'items')
 }
 
 // GET /api/diagram - Returns current diagram state
@@ -49,7 +34,7 @@ export async function GET() {
   try {
     console.log('🔥 GET /api/diagram called at:', new Date().toISOString())
     
-    const currentDiagram = await loadDiagram()
+    const currentDiagram = getDiagram()
     console.log('🔥 Current diagram has', currentDiagram.items.length, 'items')
     
     // Format the response for Chipp AI
@@ -197,7 +182,7 @@ export async function PUT(request: NextRequest) {
     console.log('🔥 Generated', newItems.length, 'items:', newItems.map(i => `${i.section}: ${i.text}`))
 
     // Load current diagram and update it
-    const currentDiagram = await loadDiagram()
+    const currentDiagram = getDiagram()
     const updatedDiagram = {
       ...currentDiagram,
       title: title.trim(),
@@ -206,8 +191,8 @@ export async function PUT(request: NextRequest) {
       version: currentDiagram.version + 1
     }
 
-    // Save to database
-    await saveDiagram(updatedDiagram)
+    // Save to memory
+    setDiagram(updatedDiagram)
     
     console.log('🔥 Updated diagram. New version:', updatedDiagram.version)
     console.log('🔥 Current diagram now has', updatedDiagram.items.length, 'items')
