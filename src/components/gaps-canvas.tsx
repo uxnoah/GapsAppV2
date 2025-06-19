@@ -43,6 +43,18 @@ export const GapsCanvas = () => {
   const titleInputRef = React.useRef<HTMLInputElement>(null)
   const titleSpanRef = React.useRef<HTMLHeadingElement>(null)
 
+  // Load data on component mount and set up periodic refresh for external updates
+  React.useEffect(() => {
+    loadDiagramFromAPI()
+    
+    // Check for external updates every 10 seconds (less aggressive than before)
+    const interval = setInterval(() => {
+      loadDiagramFromAPI()
+    }, 10000)
+    
+    return () => clearInterval(interval)
+  }, [])
+
   // Load initial data from API
   const loadDiagramFromAPI = async () => {
     try {
@@ -53,8 +65,6 @@ export const GapsCanvas = () => {
       
       if (response.ok) {
         const data = await response.json()
-        console.log('🎯 API response data:', JSON.stringify(data, null, 2))
-        
         // Convert API response to diagram format
         const items: GapsItem[] = []
         let idCounter = 1
@@ -107,7 +117,7 @@ export const GapsCanvas = () => {
           })
         })
 
-        console.log('🎯 Converted to', items.length, 'items:', items.map(i => `${i.section}: ${i.text}`))
+        console.log('🎯 Loaded', items.length, 'items from API')
 
         setDiagram(prev => ({
           ...prev,
@@ -115,8 +125,6 @@ export const GapsCanvas = () => {
           items,
           updatedAt: new Date()
         }))
-        
-        console.log('🎯 Diagram state updated!')
       } else {
         console.log('🎯 Response not ok:', response.status, response.statusText)
       }
@@ -222,10 +230,7 @@ export const GapsCanvas = () => {
     }
   }
 
-  // Load data on component mount only (no polling)
-  React.useEffect(() => {
-    loadDiagramFromAPI()
-  }, [])
+
 
   // Item management functions
   const handleAddItem = (section: GapsSection) => {
