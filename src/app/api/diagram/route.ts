@@ -1,60 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GapsDiagram, GapsItem } from '@/lib/types'
 
-// Global state that persists across requests in the same instance
-// In serverless, this will reset on cold starts, but it's better than nothing
-global.diagramState = global.diagramState || null
-
-function getDiagram(): GapsDiagram {
-  if (!global.diagramState) {
-    console.log('🚀 Creating new diagram state (cold start)')
-    global.diagramState = {
-      id: 'demo-diagram',
-      title: '',
-      items: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      version: 1
-    }
-  }
-  return global.diagramState
-}
-
-function setDiagram(diagram: GapsDiagram): void {
-  global.diagramState = diagram
-  console.log('💾 Updated diagram state:', {
-    title: diagram.title,
-    itemCount: diagram.items.length,
-    version: diagram.version
-  })
+// Simple in-memory store - works fine for our needs
+let currentDiagram: GapsDiagram = {
+  id: 'demo-diagram',
+  title: '',
+  items: [],
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  version: 1
 }
 
 // GET /api/diagram - Returns current diagram state
 export async function GET() {
   try {
-    const diagram = getDiagram()
-    console.log('📖 GET request - Current diagram state:', {
-      title: diagram.title,
-      itemCount: diagram.items.length,
-      version: diagram.version
-    })
-    
     // Format the response for Chipp AI
     const response = {
-      title: diagram.title,
-      status: diagram.items
+      title: currentDiagram.title,
+      status: currentDiagram.items
         .filter(item => item.section === 'status')
         .sort((a, b) => a.order - b.order)
         .map(item => item.text),
-      goal: diagram.items
+      goal: currentDiagram.items
         .filter(item => item.section === 'goal')
         .sort((a, b) => a.order - b.order)
         .map(item => item.text),
-      analysis: diagram.items
+      analysis: currentDiagram.items
         .filter(item => item.section === 'analysis')
         .sort((a, b) => a.order - b.order)
         .map(item => item.text),
-      plan: diagram.items
+      plan: currentDiagram.items
         .filter(item => item.section === 'plan')
         .sort((a, b) => a.order - b.order)
         .map(item => item.text)
@@ -74,7 +49,6 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json()
-    console.log('🔍 PUT request received - Raw body:', JSON.stringify(body, null, 2))
     
     // Support both old format and new two-parameter format
     let title: string
@@ -85,21 +59,15 @@ export async function PUT(request: NextRequest) {
 
     // Check if this is the new two-parameter format
     if (body.current_state && body.gap_analysis) {
-      console.log('📦 Using NEW two-parameter format')
       // New format: two parameters from Chipp
       const { current_state, gap_analysis } = body
-      
-      console.log('📊 current_state:', JSON.stringify(current_state, null, 2))
-      console.log('📈 gap_analysis:', JSON.stringify(gap_analysis, null, 2))
       
       // Parse current_state (can be string or object)
       let currentStateData
       if (typeof current_state === 'string') {
         try {
           currentStateData = JSON.parse(current_state)
-          console.log('✅ Parsed current_state from string:', currentStateData)
         } catch {
-          console.error('❌ Failed to parse current_state as JSON')
           return NextResponse.json(
             { error: 'Invalid current_state format. Must be valid JSON.' },
             { status: 400 }
@@ -107,7 +75,6 @@ export async function PUT(request: NextRequest) {
         }
       } else {
         currentStateData = current_state
-        console.log('✅ Using current_state as object:', currentStateData)
       }
 
       // Parse gap_analysis (can be string or object)
@@ -115,9 +82,7 @@ export async function PUT(request: NextRequest) {
       if (typeof gap_analysis === 'string') {
         try {
           gapAnalysisData = JSON.parse(gap_analysis)
-          console.log('✅ Parsed gap_analysis from string:', gapAnalysisData)
         } catch {
-          console.error('❌ Failed to parse gap_analysis as JSON')
           return NextResponse.json(
             { error: 'Invalid gap_analysis format. Must be valid JSON.' },
             { status: 400 }
@@ -125,32 +90,22 @@ export async function PUT(request: NextRequest) {
         }
       } else {
         gapAnalysisData = gap_analysis
-        console.log('✅ Using gap_analysis as object:', gapAnalysisData)
       }
 
       // Extract fields from parsed data
-      title = currentStateData?.title || 'GAPS Diagram'
+      title = currentStateData?.title || ''
       status = Array.isArray(currentStateData?.status) ? currentStateData.status : []
       goal = Array.isArray(currentStateData?.goal) ? currentStateData.goal : []
       analysis = Array.isArray(gapAnalysisData?.analysis) ? gapAnalysisData.analysis : []
       plan = Array.isArray(gapAnalysisData?.plan) ? gapAnalysisData.plan : []
     } else {
-      console.log('📦 Using OLD direct fields format')
       // Old format: direct fields (for backward compatibility)
-      title = body.title || 'GAPS Diagram'
+      title = body.title || ''
       status = Array.isArray(body.status) ? body.status : []
       goal = Array.isArray(body.goal) ? body.goal : []
       analysis = Array.isArray(body.analysis) ? body.analysis : []
       plan = Array.isArray(body.plan) ? body.plan : []
     }
-
-    console.log('🎯 Final extracted data:', {
-      title,
-      status,
-      goal,
-      analysis,
-      plan
-    })
 
     // Generate new items with proper IDs and metadata
     const newItems: GapsItem[] = []
@@ -214,14 +169,14 @@ export async function PUT(request: NextRequest) {
 
     // Update the diagram
     const updatedDiagram = {
-      ...getDiagram(),
+      ...currentDiagram,
       title: title.trim(),
       items: newItems,
       updatedAt: new Date(),
-      version: getDiagram().version + 1
+      version: currentDiagram.version + 1
     }
 
-    setDiagram(updatedDiagram)
+    currentDiagram = updatedDiagram
 
     return NextResponse.json({
       success: true,

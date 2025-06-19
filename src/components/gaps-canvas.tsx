@@ -46,12 +46,10 @@ export const GapsCanvas = () => {
   // Load initial data from API
   const loadDiagramFromAPI = async () => {
     try {
-      console.log('🔄 Loading diagram from API...')
       // Use relative path - works in any environment (localhost, staging, production)
       const response = await fetch('/api/diagram')
       if (response.ok) {
         const data = await response.json()
-        console.log('📊 API Response:', data)
         
         // Convert API response to diagram format
         const items: GapsItem[] = []
@@ -105,20 +103,15 @@ export const GapsCanvas = () => {
           })
         })
 
-        console.log('✅ Converted items:', items)
-        console.log('📝 Setting title to:', data.title || 'GAPS Diagram')
-
         setDiagram(prev => ({
           ...prev,
-          title: data.title || 'GAPS Diagram',
+          title: data.title || '',
           items,
           updatedAt: new Date()
         }))
-      } else {
-        console.error('❌ API Response not OK:', response.status, response.statusText)
       }
     } catch (error) {
-      console.error('❌ Failed to load diagram from API:', error)
+      console.error('Failed to load diagram from API:', error)
     }
   }
 
