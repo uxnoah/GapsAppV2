@@ -450,7 +450,7 @@ export const GapsCanvas = () => {
   }
 
   const handleDrop = (e: React.DragEvent, targetSection: GapsSection) => {
-    console.log('🎯 DROP TRIGGERED to section:', targetSection)
+    console.log('🎯 HANDLE_DROP TRIGGERED to section:', targetSection)
     e.preventDefault()
     setDropIndicator(null)
     
@@ -476,15 +476,15 @@ export const GapsCanvas = () => {
       }
       setDiagram(updatedDiagram)
       
-      // Save to database
-      console.log('🎯 Scheduling save for DROP...')
-      setTimeout(() => saveDiagramToAPI(updatedDiagram), 100)
+      // NOTE: Save removed from handleDrop - handleItemDrop handles saves
+      console.log('🎯 handleDrop: State updated, but save delegated to handleItemDrop')
     } catch (error) {
       console.error('Error parsing drag data:', error)
     }
   }
 
   const handleItemDrop = (e: React.DragEvent, targetSection: GapsSection, targetIndex: number) => {
+    console.log('🎯 HANDLE_ITEM_DROP TRIGGERED to section:', targetSection, 'index:', targetIndex)
     e.preventDefault()
     e.stopPropagation()
     setDropIndicator(null)
@@ -552,6 +552,7 @@ export const GapsCanvas = () => {
       })
       
       // Save to database after state update
+      console.log('🎯 handleItemDrop: Scheduling save...')
       setTimeout(() => {
         setDiagram(currentDiagram => {
           saveDiagramToAPI(currentDiagram)
