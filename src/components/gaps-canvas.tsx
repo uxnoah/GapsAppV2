@@ -354,10 +354,13 @@ export const GapsCanvas = () => {
 
   // Save current diagram state to database
   const saveDiagramToAPI = async (diagramToSave?: GapsDiagram) => {
+    const timestamp = new Date().toLocaleTimeString()
+    const saveId = Math.random().toString(36).substr(2, 9)
+    
     try {
       const currentDiagram = diagramToSave || diagram
-      console.log('🚀 SAVE TRIGGERED: Saving diagram to database...', currentDiagram.title)
-      console.log('🚀 Current diagram items count:', currentDiagram.items.length)
+      console.log(`🚀 SAVE #${saveId} TRIGGERED at ${timestamp}: Saving diagram to database...`, currentDiagram.title)
+      console.log(`🚀 SAVE #${saveId} Current diagram items count:`, currentDiagram.items.length)
 
       // Convert diagram format to API format
       const apiData = {
@@ -368,7 +371,7 @@ export const GapsCanvas = () => {
         plan: getItemsBySection(currentDiagram.items, 'plan').map(item => item.text)
       }
 
-      console.log('🚀 API Data being sent:', apiData)
+      console.log(`🚀 SAVE #${saveId} API Data being sent:`, apiData)
 
       const response = await fetch('/api/diagram', {
         method: 'PUT',
@@ -376,17 +379,17 @@ export const GapsCanvas = () => {
         body: JSON.stringify(apiData)
       })
 
-      console.log('🚀 Response status:', response.status)
+      console.log(`🚀 SAVE #${saveId} Response status:`, response.status)
 
       if (response.ok) {
-        console.log('✅ Successfully saved to database')
+        console.log(`✅ SAVE #${saveId} Successfully saved to database`)
       } else {
-        console.error('❌ Failed to save to database:', response.status)
+        console.error(`❌ SAVE #${saveId} Failed to save to database:`, response.status)
         const errorText = await response.text()
-        console.error('❌ Error details:', errorText)
+        console.error(`❌ SAVE #${saveId} Error details:`, errorText)
       }
     } catch (error) {
-      console.error('❌ Error saving to database:', error)
+      console.error(`❌ SAVE #${saveId} Error saving to database:`, error)
     }
   }
 
@@ -563,6 +566,8 @@ export const GapsCanvas = () => {
   // Manual test function for debugging
   const testSave = () => {
     console.log('🧪 MANUAL TEST SAVE TRIGGERED')
+    console.log('🚀 SAVE TRIGGERED: Saving diagram to database...', diagram.title)
+    console.log('🚀 Current diagram items count:', diagram.items.length)
     saveDiagramToAPI()
   }
 

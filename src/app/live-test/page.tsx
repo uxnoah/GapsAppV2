@@ -41,23 +41,51 @@ export default function LiveTestPage() {
     setApiLogs(prev => [`${new Date().toLocaleTimeString()}: ${message}`, ...prev.slice(0, 9)])
   }
 
+  // Intercept API calls to show in activity panel
+  useEffect(() => {
+    const originalFetch = window.fetch
+    let callCount = 0
+    
+    window.fetch = async (...args) => {
+      const [url, options] = args
+      const method = options?.method || 'GET'
+      
+      // Only log non-polling API calls
+      if (typeof url === 'string' && url.includes('/api/') && 
+          !url.includes('/api/test-database/stats') && 
+          !url.includes('/api/test-database/get-board') &&
+          !url.includes('/api/test-database/current-board') &&
+          method !== 'GET') {
+        callCount++
+        addLog(`${method} ${url} (#${callCount})`)
+        console.log('🔍 API CALL INTERCEPTED:', method, url, 'Call #', callCount)
+      }
+      
+      return originalFetch(...args)
+    }
+
+    return () => {
+      window.fetch = originalFetch
+    }
+  }, [])
+
   // Load database stats and current board
   const loadDatabaseState = async () => {
     try {
-      // Get stats
+      // Get stats (silently, don't log this one)
       const statsResponse = await fetch('/api/test-database/stats')
       if (statsResponse.ok) {
         const statsData = await statsResponse.json()
         setStats(statsData.stats)
       }
 
-      // Get current diagram state 
+      // Get current diagram state (silently)
       const diagramResponse = await fetch('/api/diagram')
       if (diagramResponse.ok) {
         const diagramData = await diagramResponse.json()
         
-        // Get the actual board from database to see full data
-        const boardResponse = await fetch('/api/test-database/get-board/1') // Assuming board ID 1
+        // Get the actual board from database using the same logic as diagram API
+        const boardResponse = await fetch('/api/test-database/current-board')
         if (boardResponse.ok) {
           const boardData = await boardResponse.json()
           setCurrentBoard(boardData.board)
@@ -68,13 +96,13 @@ export default function LiveTestPage() {
     }
   }
 
-  // Auto-refresh database state
+  // Auto-refresh database state (much less aggressive)
   useEffect(() => {
     loadDatabaseState()
     
     const interval = setInterval(() => {
       loadDatabaseState()
-    }, 2000) // Refresh every 2 seconds
+    }, 10000) // Refresh every 10 seconds instead of 2
     
     return () => clearInterval(interval)
   }, [refreshKey])
@@ -114,11 +142,14 @@ export default function LiveTestPage() {
 
   const saveCurrentUIState = async () => {
     try {
-      addLog('Saving current UI state to database...')
+      addLog('🚀 MANUAL SAVE: Starting UI state save...')
+      console.log('🚀 MANUAL SAVE TRIGGERED from Live Test page')
       
       // Get current state from the API
       const response = await fetch('/api/diagram')
       const currentData = await response.json()
+      
+      addLog(`📊 Retrieved ${currentData.status?.length + currentData.goal?.length + currentData.analysis?.length + currentData.plan?.length || 0} thoughts`)
       
       // Save it back (this tests the PUT endpoint)
       const putResponse = await fetch('/api/diagram', {
@@ -127,14 +158,19 @@ export default function LiveTestPage() {
         body: JSON.stringify(currentData)
       })
       
+      console.log('🚀 Save response status:', putResponse.status)
+      
       if (putResponse.ok) {
-        addLog('✅ UI state saved to database')
+        addLog('✅ UI state successfully saved to database')
+        console.log('✅ Manual save completed successfully')
         handleRefresh()
       } else {
-        addLog('❌ Failed to save UI state')
+        addLog(`❌ Failed to save UI state (${putResponse.status})`)
+        console.error('❌ Manual save failed:', putResponse.status)
       }
     } catch (error) {
       addLog(`❌ Error: ${error.message}`)
+      console.error('❌ Manual save error:', error)
     }
   }
 
@@ -149,6 +185,9 @@ export default function LiveTestPage() {
             </h1>
             <p className="text-gray-600">
               Interact with your UI and watch database changes in real-time
+            </p>
+            <p className="text-sm text-orange-600 bg-orange-50 px-3 py-1 rounded mt-2">
+              ⚡ Terminal spam reduced - watch API Activity panel instead!
             </p>
           </div>
           
@@ -169,9 +208,9 @@ export default function LiveTestPage() {
             
             <button
               onClick={saveCurrentUIState}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-semibold"
             >
-              💾 Save UI to DB
+              💾 TEST SAVE (MANUAL)
             </button>
           </div>
         </div>
@@ -273,15 +312,23 @@ export default function LiveTestPage() {
                 📡 API Activity
               </h3>
               
-              <div className="space-y-1 max-h-40 overflow-y-auto text-xs font-mono">
+              <div className="space-y-1 max-h-60 overflow-y-auto text-sm font-mono">
                 {apiLogs.length > 0 ? (
                   apiLogs.map((log, index) => (
-                    <div key={index} className="text-gray-700 bg-gray-50 p-1 rounded">
+                    <div key={index} className={`p-2 rounded ${
+                      log.includes('✅') ? 'bg-green-50 text-green-800' :
+                      log.includes('❌') ? 'bg-red-50 text-red-800' :
+                      log.includes('🚀') ? 'bg-blue-50 text-blue-800' :
+                      'bg-gray-50 text-gray-700'
+                    }`}>
                       {log}
                     </div>
                   ))
                 ) : (
-                  <div className="text-gray-500">No API activity yet...</div>
+                  <div className="text-gray-500 text-center p-4 border-2 border-dashed border-gray-200 rounded">
+                    No API activity yet...<br/>
+                    <span className="text-xs">Try clicking "TEST SAVE" or interacting with the UI</span>
+                  </div>
                 )}
               </div>
             </div>
