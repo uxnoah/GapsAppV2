@@ -62,6 +62,36 @@ export async function getUserById(id: number) {
   })
 }
 
+export async function updateUser(id: number, data: {
+  username?: string
+  email?: string
+  displayName?: string
+  avatarUrl?: string
+  preferences?: any
+}) {
+  return await prisma.user.update({
+    where: { id },
+    data,
+    select: { 
+      id: true, 
+      username: true, 
+      email: true, 
+      displayName: true,
+      avatarUrl: true,
+      isAdmin: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  })
+}
+
+export async function deleteUser(id: number) {
+  // This will cascade delete all user's boards, thoughts, etc.
+  return await prisma.user.delete({
+    where: { id },
+  })
+}
+
 // Board Management
 export async function createBoard(data: {
   title: string
@@ -105,7 +135,7 @@ export async function getBoardById(id: number, userId?: number) {
         select: { id: true, username: true, email: true },
       },
       _count: {
-        select: { thoughts: true, meetingMinutes: true },
+        select: { thoughts: true, workSessions: true },
       },
     },
   })
@@ -120,6 +150,34 @@ export async function getUserBoards(userId: number) {
       },
     },
     orderBy: { updatedAt: 'desc' },
+  })
+}
+
+export async function updateBoard(id: number, data: {
+  title?: string
+  description?: string
+  isPublic?: boolean
+  isTemplate?: boolean
+}) {
+  return await prisma.board.update({
+    where: { id },
+    data,
+    include: {
+      thoughts: true,
+      user: {
+        select: { id: true, username: true, email: true },
+      },
+    },
+  })
+}
+
+export async function deleteBoard(id: number, userId: number) {
+  // Ensure user can only delete their own boards
+  return await prisma.board.delete({
+    where: { 
+      id,
+      userId, // This ensures data isolation
+    },
   })
 }
 
@@ -161,26 +219,108 @@ export async function deleteThought(id: number) {
   })
 }
 
-// Activity Logging
+export async function moveThought(id: number, data: {
+  quadrant: string
+  position?: number
+  boardId?: number // Optional: move to different board
+}) {
+  return await prisma.thought.update({
+    where: { id },
+    data: {
+      quadrant: data.quadrant,
+      position: data.position,
+      boardId: data.boardId,
+    },
+  })
+}
+
+export async function reorderThoughts(boardId: number, quadrant: string, thoughtOrders: { id: number, position: number }[]) {
+  // Update multiple thoughts' positions in a single transaction
+  return await prisma.$transaction(
+    thoughtOrders.map(({ id, position }) =>
+      prisma.thought.update({
+        where: { id, boardId }, // Ensure thought belongs to the board
+        data: { position },
+      })
+    )
+  )
+}
+
+export async function editThought(id: number, data: {
+  content?: string
+  priority?: string
+  status?: string
+  tags?: any
+  aiGenerated?: boolean
+  confidence?: number
+}) {
+  return await prisma.thought.update({
+    where: { id },
+    data,
+  })
+}
+
+// Session and Activity Logging
+export async function createWorkSession(data: {
+  boardId: number
+  userId: number
+  title?: string
+  description?: string
+}) {
+  const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  
+  return await prisma.workSession.create({
+    data: {
+      boardId: data.boardId,
+      userId: data.userId,
+      title: data.title,
+      description: data.description,
+      sessionId,
+    },
+  })
+}
+
 export async function logActivity(data: {
   action: string
   detail: string
-  boardId: number
-  userId?: number
+  sessionId: number // Now requires a session ID
   entityType?: string
   entityId?: number
-  sessionId?: string
 }) {
-  return await prisma.meetingMinute.create({
+  return await prisma.activityLog.create({
     data: {
       action: data.action,
       detail: data.detail,
-      boardId: data.boardId,
-      userId: data.userId,
+      sessionId: data.sessionId,
       entityType: data.entityType,
       entityId: data.entityId,
-      sessionId: data.sessionId,
     },
+  })
+}
+
+// Convenience function for simple activity logging
+export async function logActivityToBoard(data: {
+  action: string
+  detail: string
+  boardId: number
+  userId: number
+  entityType?: string
+  entityId?: number
+}) {
+  // Create or get current session for this board/user
+  const session = await createWorkSession({
+    boardId: data.boardId,
+    userId: data.userId,
+    title: 'Auto Session',
+    description: 'Automatically created session for activity logging'
+  })
+  
+  return await logActivity({
+    action: data.action,
+    detail: data.detail,
+    sessionId: session.id,
+    entityType: data.entityType,
+    entityId: data.entityId,
   })
 }
 

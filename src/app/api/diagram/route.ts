@@ -1,81 +1,148 @@
 /**
  * API ROUTE: DIAGRAM MANAGEMENT (/api/diagram/route.ts)
  * =====================================================
- * This is the "server" part of our application - it runs on Vercel's servers
- * and handles requests from both our frontend and external services like Chipp.ai
+ * **UPDATED**: Now uses professional database storage instead of memory!
  * 
  * This file handles two main operations:
  * 1. GET requests - Return current diagram data (frontend asking "what's the current state?")
  * 2. PUT requests - Update diagram with new data (Chipp.ai saying "here's new data!")
  * 
- * IMPORTANT CONCEPTS:
- * - This runs in a "serverless" environment (functions that start/stop as needed)
- * - Memory storage only lasts during the function's lifetime
- * - Each request might use a different function instance
- * - We use simple memory storage for this demo (in production, we'd use a database)
+ * NEW FEATURES:
+ * - ✅ Persistent database storage (data survives server restarts)
+ * - ✅ Multi-user ready (each user gets their own boards)
+ * - ✅ Activity logging (track all changes)
+ * - ✅ Proper relationships and data integrity
  */
 
 // IMPORTS SECTION
 // ===============
-import { NextRequest, NextResponse } from 'next/server' // Next.js tools for handling HTTP requests
-import { GapsDiagram, GapsItem } from '@/lib/types'      // Our custom data types
+import { NextRequest, NextResponse } from 'next/server'
+import { GapsDiagram, GapsItem } from '@/lib/types'
+import { 
+  getUserByEmail, 
+  createUser, 
+  getUserBoards, 
+  createBoard, 
+  getBoardById,
+  updateBoard,
+  createThought,
+  updateThought,
+  deleteThought,
+  logActivityToBoard,
+  prisma
+} from '@/lib/database'
+import bcrypt from 'bcryptjs'
 
 // =============================================================================
-// MEMORY STORAGE SYSTEM
+// DATABASE INTEGRATION
 // =============================================================================
-// NOTE: This is a simple storage system for our demo. In a real production app,
-// we would use a proper database like PostgreSQL, MongoDB, or Redis.
 
 /**
- * GLOBAL MEMORY VARIABLE
- * ======================
- * This variable holds our diagram data in the server's memory.
- * It persists as long as the serverless function stays "warm" (active).
- * When the function goes "cold" (inactive), this data is lost.
+ * DEFAULT USER SETUP (TEMPORARY - BEFORE AUTHENTICATION)
+ * ======================================================
+ * For now, we'll create a default user so the app works without login.
+ * Later, this will be replaced with proper authentication.
  */
-let memoryDiagram: GapsDiagram | null = null
+const DEFAULT_USER_EMAIL = 'demo@chapp.local'
+const DEFAULT_BOARD_TITLE = 'My GAPS Diagram'
 
 /**
- * DEFAULT DIAGRAM TEMPLATE
- * ========================
- * This is the starting point when no diagram exists yet.
- * It creates an empty diagram structure that can be populated.
+ * GET OR CREATE DEFAULT USER
+ * ==========================
+ * Ensures we have a default user to work with before authentication is added.
  */
-const defaultDiagram: GapsDiagram = {
-  id: 'demo-diagram',        // Fixed ID for our demo
-  title: '',                 // Empty title to start
-  items: [],                 // No items initially
-  createdAt: new Date(),     // Current timestamp
-  updatedAt: new Date(),     // Current timestamp
-  version: 1                 // Start at version 1
-}
-
-/**
- * GET DIAGRAM FROM MEMORY
- * =======================
- * This function retrieves the current diagram from memory.
- * If no diagram exists, it creates a new empty one.
- * Think of this as opening a file - if the file doesn't exist, create a blank one.
- */
-const getDiagram = (): GapsDiagram => {
-  // Check if we have a diagram in memory
-  if (!memoryDiagram) {
-    console.log('📀 Initializing new diagram in memory')
-    memoryDiagram = { ...defaultDiagram } // Create a copy of the default diagram
+async function getOrCreateDefaultUser() {
+  try {
+    // Try to find existing default user
+    let user = await getUserByEmail(DEFAULT_USER_EMAIL)
+    
+    if (!user) {
+      console.log('🏗️ Creating default user for demo')
+      // Create default user
+      const hashedPassword = await bcrypt.hash('demo-password', 10)
+      user = await createUser({
+        username: 'demo-user',
+        email: DEFAULT_USER_EMAIL,
+        passwordHash: hashedPassword,
+        isAdmin: false
+      })
+    }
+    
+    return user
+  } catch (error) {
+    console.error('Error with default user:', error)
+    throw error
   }
-  console.log('📀 Loaded diagram from memory:', memoryDiagram.title, 'with', memoryDiagram.items?.length || 0, 'items')
-  return memoryDiagram
 }
 
 /**
- * SAVE DIAGRAM TO MEMORY
- * ======================
- * This function saves a diagram to memory storage.
- * Think of this as saving a file to disk.
+ * GET OR CREATE DEFAULT BOARD
+ * ===========================
+ * Ensures the default user has a board to work with.
  */
-const setDiagram = (diagram: GapsDiagram): void => {
-  memoryDiagram = diagram // Store the diagram in our global variable
-  console.log('💾 Saved diagram to memory:', diagram.title, 'with', diagram.items.length, 'items')
+async function getOrCreateDefaultBoard(userId: number) {
+  try {
+    // Get user's boards
+    const boards = await getUserBoards(userId)
+    
+    if (boards.length === 0) {
+      console.log('🏗️ Creating default board for user')
+      // Create default board
+      return await createBoard({
+        title: DEFAULT_BOARD_TITLE,
+        userId: userId,
+        description: 'Default GAPS diagram board'
+      })
+    }
+    
+    // Return the first board (most recently updated)
+    return await getBoardById(boards[0].id)
+  } catch (error) {
+    console.error('Error with default board:', error)
+    throw error
+  }
+}
+
+/**
+ * CONVERT DATABASE TO API FORMAT
+ * ==============================
+ * Converts our database board+thoughts into the API format your frontend expects.
+ */
+function convertDatabaseToApiFormat(board: any): any {
+  if (!board || !board.thoughts) {
+    return {
+      title: DEFAULT_BOARD_TITLE,
+      status: [],
+      goal: [],
+      analysis: [],
+      plan: []
+    }
+  }
+
+  // Group thoughts by quadrant and sort by position
+  const groupedThoughts = {
+    status: board.thoughts
+      .filter((t: any) => t.quadrant === 'status')
+      .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
+      .map((t: any) => t.content),
+    goal: board.thoughts
+      .filter((t: any) => t.quadrant === 'goal')
+      .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
+      .map((t: any) => t.content),
+    analysis: board.thoughts
+      .filter((t: any) => t.quadrant === 'analysis')
+      .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
+      .map((t: any) => t.content),
+    plan: board.thoughts
+      .filter((t: any) => t.quadrant === 'plan')
+      .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
+      .map((t: any) => t.content)
+  }
+
+  return {
+    title: board.title,
+    ...groupedThoughts
+  }
 }
 
 // =============================================================================
@@ -86,56 +153,34 @@ const setDiagram = (diagram: GapsDiagram): void => {
 /**
  * GET REQUEST HANDLER
  * ===================
- * Handles GET requests to /api/diagram
+ * **UPDATED**: Now loads data from database instead of memory!
+ * 
  * This is called when:
- * - Our frontend wants to load the current diagram
+ * - Your React frontend wants to load the current diagram
  * - External services want to read the current state
  * 
- * Returns the diagram data in a format that's easy for clients to use
+ * Returns the same API format as before, so your frontend keeps working!
  */
 export async function GET() {
   try {
     console.log('🔥 GET /api/diagram called at:', new Date().toISOString())
     
-    // Get the current diagram from memory
-    const currentDiagram = getDiagram()
-    console.log('🔥 Current diagram has', currentDiagram.items.length, 'items')
+    // Get or create default user and board
+    const user = await getOrCreateDefaultUser()
+    const board = await getOrCreateDefaultBoard(user.id)
     
-    // FORMAT THE RESPONSE FOR CLIENTS
-    // ================================
-    // We organize the data by section, making it easy for clients to use
-    const response = {
-      title: currentDiagram.title,
-      // STATUS SECTION - Filter, sort, and extract just the text
-      status: currentDiagram.items
-        .filter(item => item.section === 'status')  // Keep only status items
-        .sort((a, b) => a.order - b.order)          // Sort by order (0, 1, 2...)
-        .map(item => item.text),                    // Extract just the text content
-      // GOAL SECTION
-      goal: currentDiagram.items
-        .filter(item => item.section === 'goal')
-        .sort((a, b) => a.order - b.order)
-        .map(item => item.text),
-      // ANALYSIS SECTION
-      analysis: currentDiagram.items
-        .filter(item => item.section === 'analysis')
-        .sort((a, b) => a.order - b.order)
-        .map(item => item.text),
-      // PLAN SECTION
-      plan: currentDiagram.items
-        .filter(item => item.section === 'plan')
-        .sort((a, b) => a.order - b.order)
-        .map(item => item.text)
-    }
+    console.log('🔥 Loaded board:', board?.title, 'with', board?.thoughts?.length || 0, 'thoughts')
+    
+    // Convert database format to API format
+    const response = convertDatabaseToApiFormat(board)
 
     console.log('🔥 Returning GET response:', JSON.stringify(response, null, 2))
-    return NextResponse.json(response) // Send the data back as JSON
+    return NextResponse.json(response)
   } catch (error) {
-    // If something goes wrong, return an error response
     console.error('🔥 Error fetching diagram:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch diagram' },
-      { status: 500 } // HTTP status code 500 means "server error"
+      { error: 'Failed to fetch diagram', details: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
     )
   }
 }
@@ -143,64 +188,44 @@ export async function GET() {
 /**
  * PUT REQUEST HANDLER
  * ===================
- * Handles PUT requests to /api/diagram
- * This is called when:
- * - Chipp.ai sends us new diagram data
- * - Our frontend test button sends sample data
+ * **UPDATED**: Now saves data to database instead of memory!
  * 
- * PUT requests are used for "update" operations - replacing existing data with new data
+ * This is called when:
+ * - Chipp.ai sends new diagram data
+ * - Your frontend saves changes
+ * - External services update the diagram
+ * 
+ * Maintains the same API format, but now with persistent database storage!
  */
 export async function PUT(request: NextRequest) {
   try {
     console.log('🔥 PUT /api/diagram called at:', new Date().toISOString())
-    console.log('🔥 Request headers:', Object.fromEntries(request.headers.entries()))
     
-    // PARSE THE REQUEST BODY
-    // ======================
-    // The request contains JSON data that we need to extract and parse
+    // Parse the request body
     const body = await request.json()
     console.log('🔥 Request body received:', JSON.stringify(body, null, 2))
     
-    // DECLARE VARIABLES FOR EXTRACTED DATA
-    // ====================================
-    // We'll populate these variables based on the format of incoming data
+    // Extract data variables
     let title: string
     let status: string[]
     let goal: string[]
     let analysis: string[]
     let plan: string[]
 
-    // HANDLE DIFFERENT DATA FORMATS
-    // =============================
-    // Chipp.ai sends data in a specific two-parameter format, but we also
-    // support a simpler direct format for testing and backward compatibility
-    
-    // Check for Chipp's format with "current state" (space) and "gap_analysis"
+    // Handle different data formats (Chipp vs direct)
     if ((body['current state'] || body.current_state) && body.gap_analysis) {
       console.log('🔥 Processing Chipp two-parameter format')
       
-      // CHIPP FORMAT EXPLANATION:
-      // Chipp sends data in two main objects:
-      // 1. "current state" - contains title, status, and goal
-      // 2. "gap_analysis" - contains analysis and plan
-      
-      // Handle "current state" (with space) or "current_state" (with underscore)
       const currentStateData = body['current state'] || body.current_state
       const gapAnalysisData = body.gap_analysis
       
-      console.log('🔥 Current state data:', currentStateData)
-      console.log('🔥 Gap analysis data:', gapAnalysisData)
-
-      // Extract fields from the two-parameter format
       title = currentStateData?.title || ''
       status = Array.isArray(currentStateData?.status) ? currentStateData.status : []
       goal = Array.isArray(currentStateData?.goal) ? currentStateData.goal : []
       analysis = Array.isArray(gapAnalysisData?.analysis) ? gapAnalysisData.analysis : []
       plan = Array.isArray(gapAnalysisData?.plan) ? gapAnalysisData.plan : []
     } else {
-      console.log('🔥 Processing old/direct format')
-      // DIRECT FORMAT - simpler structure for testing
-      // All fields are directly in the main body object
+      console.log('🔥 Processing direct format')
       title = body.title || ''
       status = Array.isArray(body.status) ? body.status : []
       goal = Array.isArray(body.goal) ? body.goal : []
@@ -210,123 +235,114 @@ export async function PUT(request: NextRequest) {
 
     console.log('🔥 Extracted data:')
     console.log('  - title:', title)
-    console.log('  - status:', status)
-    console.log('  - goal:', goal)
-    console.log('  - analysis:', analysis)
-    console.log('  - plan:', plan)
+    console.log('  - status:', status.length, 'items')
+    console.log('  - goal:', goal.length, 'items')
+    console.log('  - analysis:', analysis.length, 'items')
+    console.log('  - plan:', plan.length, 'items')
 
-    // CONVERT ARRAYS TO GAPS ITEMS
+    // GET OR CREATE USER AND BOARD
     // ============================
-    // We need to convert the simple string arrays into proper GapsItem objects
-    // with IDs, timestamps, and metadata
-    const newItems: GapsItem[] = []
-    let idCounter = 1 // Counter to ensure unique IDs
-
-    // PROCESS STATUS ITEMS
-    // Each item in the status array becomes a GapsItem
-    status.forEach((text: string, index: number) => {
-      if (typeof text === 'string' && text.trim()) { // Only add non-empty strings
-        newItems.push({
-          id: `status-${idCounter++}`,    // Unique ID like "status-1", "status-2"
-          text: text.trim(),              // Clean up whitespace
-          section: 'status',              // Mark as status section
-          order: index,                   // Position in the list (0, 1, 2...)
-          createdAt: new Date(),          // Current timestamp
-          updatedAt: new Date()           // Current timestamp
-        })
-      }
-    })
-
-    // PROCESS GOAL ITEMS (same pattern as status)
-    goal.forEach((text: string, index: number) => {
-      if (typeof text === 'string' && text.trim()) {
-        newItems.push({
-          id: `goal-${idCounter++}`,
-          text: text.trim(),
-          section: 'goal',
-          order: index,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-      }
-    })
-
-    // PROCESS ANALYSIS ITEMS (same pattern)
-    analysis.forEach((text: string, index: number) => {
-      if (typeof text === 'string' && text.trim()) {
-        newItems.push({
-          id: `analysis-${idCounter++}`,
-          text: text.trim(),
-          section: 'analysis',
-          order: index,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-      }
-    })
-
-    // PROCESS PLAN ITEMS (same pattern)
-    plan.forEach((text: string, index: number) => {
-      if (typeof text === 'string' && text.trim()) {
-        newItems.push({
-          id: `plan-${idCounter++}`,
-          text: text.trim(),
-          section: 'plan',
-          order: index,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-      }
-    })
-
-    console.log('🔥 Generated', newItems.length, 'items:', newItems.map(i => `${i.section}: ${i.text}`))
-
-    // UPDATE THE DIAGRAM
-    // ==================
-    // Load the current diagram, update it with new data, and save it back
-    const currentDiagram = getDiagram()
-    const updatedDiagram = {
-      ...currentDiagram,              // Keep existing properties (id, createdAt, etc.)
-      title: title.trim(),            // Update title
-      items: newItems,                // Replace all items with new ones
-      updatedAt: new Date(),          // Update the timestamp
-      version: currentDiagram.version + 1  // Increment version number
+    const user = await getOrCreateDefaultUser()
+    const board = await getOrCreateDefaultBoard(user.id)
+    
+    if (!board) {
+      throw new Error('Failed to get or create board')
     }
 
-    // Save the updated diagram to memory
-    setDiagram(updatedDiagram)
+    // UPDATE BOARD TITLE IF PROVIDED
+    // ==============================
+    if (title.trim() && title.trim() !== board.title) {
+      await updateBoard(board.id, { title: title.trim() })
+      console.log('🔥 Updated board title to:', title.trim())
+    }
+
+    // DATABASE TRANSACTION: REPLACE ALL THOUGHTS
+    // ==========================================
+    // We'll delete all existing thoughts and create new ones
+    // This ensures clean updates when data comes from external sources
     
-    console.log('🔥 Updated diagram. New version:', updatedDiagram.version)
-    console.log('🔥 Current diagram now has', updatedDiagram.items.length, 'items')
+    await prisma.$transaction(async (tx) => {
+      // Delete all existing thoughts for this board
+      await tx.thought.deleteMany({
+        where: { boardId: board.id }
+      })
+      console.log('🔥 Deleted existing thoughts')
+
+      // Create new thoughts for each quadrant
+      const thoughtsToCreate = []
+
+      // Process each quadrant
+      const quadrantData = [
+        { array: status, quadrant: 'status' },
+        { array: goal, quadrant: 'goal' },
+        { array: analysis, quadrant: 'analysis' },
+        { array: plan, quadrant: 'plan' }
+      ]
+
+      for (const { array, quadrant } of quadrantData) {
+        array.forEach((text: string, index: number) => {
+          if (typeof text === 'string' && text.trim()) {
+            thoughtsToCreate.push({
+              content: text.trim(),
+              quadrant: quadrant,
+              boardId: board.id,
+              position: index,
+              aiGenerated: true, // Mark as AI generated since it came via API
+            })
+          }
+        })
+      }
+
+      // Create all thoughts in batch
+      if (thoughtsToCreate.length > 0) {
+        await tx.thought.createMany({
+          data: thoughtsToCreate
+        })
+        console.log('🔥 Created', thoughtsToCreate.length, 'new thoughts')
+      }
+    })
+
+    // LOG THE ACTIVITY
+    // ===============
+    try {
+      await logActivityToBoard({
+        action: 'bulk_update',
+        detail: `Updated diagram via API: ${title.trim() || 'Untitled'} (${status.length + goal.length + analysis.length + plan.length} total items)`,
+        boardId: board.id,
+        userId: user.id,
+        entityType: 'board',
+        entityId: board.id
+      })
+    } catch (logError) {
+      console.warn('🔥 Failed to log activity:', logError)
+      // Don't fail the whole request if logging fails
+    }
 
     // PREPARE SUCCESS RESPONSE
     // ========================
-    // Send back confirmation that the update worked, along with the new data
-    // This response helps clients know the update was successful and shows the final data
+    // Return the same format as before so clients continue working
     const response = {
-      success: true,                           // Indicates the operation succeeded
-      message: 'Diagram updated successfully', // Human-readable success message
+      success: true,
+      message: 'Diagram updated successfully',
       diagram: {
-        title: updatedDiagram.title,
-        // Extract text arrays for each section (same format as GET response)
-        status: newItems.filter(item => item.section === 'status').map(item => item.text),
-        goal: newItems.filter(item => item.section === 'goal').map(item => item.text),
-        analysis: newItems.filter(item => item.section === 'analysis').map(item => item.text),
-        plan: newItems.filter(item => item.section === 'plan').map(item => item.text)
+        title: title.trim(),
+        status,
+        goal,
+        analysis,
+        plan
       }
     }
 
-    console.log('🔥 Returning response:', JSON.stringify(response, null, 2))
-    return NextResponse.json(response) // Send the success response back to the client
+    console.log('🔥 Database update successful!')
+    return NextResponse.json(response)
   } catch (error) {
-    // ERROR HANDLING
-    // ==============
-    // If anything goes wrong during the update process, we catch the error
-    // and return a proper error response instead of crashing
     console.error('🔥 ERROR updating diagram:', error)
     return NextResponse.json(
-      { error: 'Failed to update diagram' },  // Error message for the client
-      { status: 500 }                         // HTTP status code 500 = server error
+      { 
+        error: 'Failed to update diagram', 
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
+      { status: 500 }
     )
   }
 } 

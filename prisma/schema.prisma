@@ -31,8 +31,7 @@ model User {
   
   // Relations
   boards      Board[]
-  conversationTurns ConversationTurn[]
-  meetingMinutes MeetingMinute[]
+  workSessions WorkSession[]
   
   @@map("users")
 }
@@ -60,8 +59,7 @@ model Board {
   
   // Relations
   thoughts    Thought[]
-  meetingMinutes MeetingMinute[]
-  conversationTurns ConversationTurn[]
+  workSessions WorkSession[]
   
   @@map("boards")
 }
@@ -94,47 +92,69 @@ model Thought {
   @@map("thoughts")
 }
 
-// MeetingMinute Model - Activity and change tracking
-model MeetingMinute {
-  id        Int      @id @default(autoincrement())
-  action    String   // add, edit, delete, move, ai_suggest, etc.
-  detail    String   // Description of the action
+// WorkSession Model - A working session on a board (replaces MeetingMinute)
+model WorkSession {
+  id          Int      @id @default(autoincrement())
+  title       String?  // Optional session title
+  description String?  // What was accomplished in this session
   
-  // Board context
-  boardId   Int      @map("board_id")
-  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  // Board context (REQUIRED - sessions always belong to a board)
+  boardId     Int      @map("board_id")
+  board       Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
   
-  // Optional user context (for collaboration)
-  userId    Int?     @map("user_id")
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  // User who created/owns this session
+  userId      Int      @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   
-  // Change tracking
-  entityType String? @map("entity_type") // thought, board, etc.
-  entityId   Int?    @map("entity_id")   // ID of changed entity
-  oldValue   Json?   @map("old_value")   // Previous state
-  newValue   Json?   @map("new_value")   // New state
+  // Session metadata
+  sessionId   String   @unique @map("session_id") // Unique session identifier
+  isActive    Boolean  @default(true) @map("is_active") // Is session ongoing?
+  metadata    Json?    // Additional session context
   
-  // Session and metadata
-  sessionId  String? @map("session_id")  // Group related actions
-  metadata   Json?   // Additional context
+  // Timestamps
+  startedAt   DateTime @default(now()) @map("started_at")
+  endedAt     DateTime? @map("ended_at")
   
-  timestamp DateTime @default(now())
+  // Relations - things that happen within this session
+  conversationTurns ConversationTurn[]
+  activityLogs      ActivityLog[]
   
-  @@map("meeting_minutes")
+  @@map("work_sessions")
 }
 
-// ConversationTurn Model - AI chat history
+// ActivityLog Model - Individual actions taken during a session
+model ActivityLog {
+  id         Int      @id @default(autoincrement())
+  action     String   // add, edit, delete, move, ai_suggest, etc.
+  detail     String   // Description of the action
+  
+  // Session context (REQUIRED - activities always happen in a session)
+  sessionId  Int      @map("session_id")
+  session    WorkSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  // Change tracking
+  entityType String?  @map("entity_type") // thought, board, etc.
+  entityId   Int?     @map("entity_id")   // ID of changed entity
+  oldValue   Json?    @map("old_value")   // Previous state
+  newValue   Json?    @map("new_value")   // New state
+  
+  // Metadata
+  metadata   Json?    // Additional context
+  
+  timestamp  DateTime @default(now())
+  
+  @@map("activity_logs")
+}
+
+// ConversationTurn Model - AI chat history within a session
 model ConversationTurn {
   id      Int    @id @default(autoincrement())
   role    String // user, assistant, system
   content String
   
-  // Context
-  boardId Int?   @map("board_id")
-  board   Board? @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  
-  userId  Int?   @map("user_id")
-  user    User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  // Session context (REQUIRED - conversations always happen in a session)
+  sessionId Int         @map("session_id")
+  session   WorkSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   
   // AI metadata
   model     String? // which AI model was used
