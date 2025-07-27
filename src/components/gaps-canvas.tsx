@@ -238,25 +238,33 @@ export const GapsCanvas = () => {
     const sectionItems = getItemsBySection(diagram.items, section)
     newItem.order = sectionItems.length
     
-    setDiagram(prev => ({
-      ...prev,
-      items: [...prev.items, newItem],
+    const updatedDiagram = {
+      ...diagram,
+      items: [...diagram.items, newItem],
       updatedAt: new Date(),
-      version: prev.version + 1
-    }))
+      version: diagram.version + 1
+    }
+    setDiagram(updatedDiagram)
     
     // Automatically start editing the new item with text selected
     setEditingItemId(newItem.id)
     setEditText('New thought')
+    
+    // Save to database
+    setTimeout(() => saveDiagramToAPI(updatedDiagram), 100)
   }
 
   const handleRemoveItem = (itemId: string) => {
-    setDiagram(prev => ({
-      ...prev,
-      items: prev.items.filter(item => item.id !== itemId),
+    const updatedDiagram = {
+      ...diagram,
+      items: diagram.items.filter(item => item.id !== itemId),
       updatedAt: new Date(),
-      version: prev.version + 1
-    }))
+      version: diagram.version + 1
+    }
+    setDiagram(updatedDiagram)
+    
+    // Save to database
+    setTimeout(() => saveDiagramToAPI(updatedDiagram), 100)
   }
 
   const handleStartEdit = (item: GapsItem) => {
@@ -265,18 +273,22 @@ export const GapsCanvas = () => {
   }
 
   const handleSaveEdit = (itemId: string) => {
-    setDiagram(prev => ({
-      ...prev,
-      items: prev.items.map(item => 
+    const updatedDiagram = {
+      ...diagram,
+      items: diagram.items.map(item => 
         item.id === itemId 
           ? { ...item, text: editText, updatedAt: new Date() }
           : item
       ),
       updatedAt: new Date(),
-      version: prev.version + 1
-    }))
+      version: diagram.version + 1
+    }
+    setDiagram(updatedDiagram)
     setEditingItemId(null)
     setEditText('')
+    
+    // Save to database
+    setTimeout(() => saveDiagramToAPI(updatedDiagram), 100)
   }
 
   const handleCancelEdit = () => {
@@ -336,15 +348,50 @@ export const GapsCanvas = () => {
     }
   }, [editingMainTitle, titleClickPosition])
 
+  // Save current diagram state to database
+  const saveDiagramToAPI = async (diagramToSave?: GapsDiagram) => {
+    try {
+      const currentDiagram = diagramToSave || diagram
+      console.log('💾 Saving diagram to database...', currentDiagram.title)
+
+      // Convert diagram format to API format
+      const apiData = {
+        title: currentDiagram.title,
+        status: getItemsBySection(currentDiagram.items, 'status').map(item => item.text),
+        goal: getItemsBySection(currentDiagram.items, 'goal').map(item => item.text),
+        analysis: getItemsBySection(currentDiagram.items, 'analysis').map(item => item.text),
+        plan: getItemsBySection(currentDiagram.items, 'plan').map(item => item.text)
+      }
+
+      const response = await fetch('/api/diagram', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(apiData)
+      })
+
+      if (response.ok) {
+        console.log('💾 Successfully saved to database')
+      } else {
+        console.error('💾 Failed to save to database:', response.status)
+      }
+    } catch (error) {
+      console.error('💾 Error saving to database:', error)
+    }
+  }
+
   const handleSaveMainTitleEdit = () => {
-    setDiagram(prev => ({
-      ...prev,
+    const updatedDiagram = {
+      ...diagram,
       title: editMainTitleText,
       updatedAt: new Date(),
-      version: prev.version + 1
-    }))
+      version: diagram.version + 1
+    }
+    setDiagram(updatedDiagram)
     setEditingMainTitle(false)
     setEditMainTitleText('')
+    
+    // Save to database
+    setTimeout(() => saveDiagramToAPI(updatedDiagram), 100)
   }
 
   const handleCancelMainTitleEdit = () => {
@@ -402,16 +449,20 @@ export const GapsCanvas = () => {
       
       const targetSectionItems = getItemsBySection(diagram.items, targetSection)
       
-      setDiagram(prev => ({
-        ...prev,
-        items: prev.items.map(item => 
+      const updatedDiagram = {
+        ...diagram,
+        items: diagram.items.map(item => 
           item.id === dragData.itemId
             ? { ...item, section: targetSection, order: targetSectionItems.length, updatedAt: new Date() }
             : item
         ),
         updatedAt: new Date(),
-        version: prev.version + 1
-      }))
+        version: diagram.version + 1
+      }
+      setDiagram(updatedDiagram)
+      
+      // Save to database
+      setTimeout(() => saveDiagramToAPI(updatedDiagram), 100)
     } catch (error) {
       console.error('Error parsing drag data:', error)
     }
@@ -474,13 +525,18 @@ export const GapsCanvas = () => {
           })
         }
         
-        return {
-          ...prev,
+        const updatedDiagram = {
+          ...diagram,
           items: newItems,
           updatedAt: new Date(),
-          version: prev.version + 1
+          version: diagram.version + 1
         }
+        
+        return updatedDiagram
       })
+      
+      // Save to database after state update
+      setTimeout(() => saveDiagramToAPI(), 100)
     } catch (error) {
       console.error('Error parsing drag data:', error)
     }

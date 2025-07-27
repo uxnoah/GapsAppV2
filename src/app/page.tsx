@@ -35,8 +35,24 @@ export default function Home() {
       {/* This shows which version of the app is currently running */}
       {/* 'absolute' positioning places it in a fixed spot on screen */}
       {/* 'top-2 right-2' = 8px from top and right edges */}
-      <div className="absolute top-2 right-2 text-xs text-gray-500 bg-white px-2 py-1 rounded">
-        v3.9-comprehensive-docs
+      <div className="absolute top-2 right-2 flex flex-col gap-2">
+        <div className="text-xs text-gray-500 bg-white px-2 py-1 rounded">
+          v3.9-comprehensive-docs
+        </div>
+        <div className="flex gap-2">
+          <a 
+            href="/live-test" 
+            className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700"
+          >
+            🔬 Live Test
+          </a>
+          <a 
+            href="/test-database" 
+            className="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700"
+          >
+            🧪 DB Tests
+          </a>
+        </div>
       </div>
       
       {/* MAIN GAPS DIAGRAM COMPONENT */}
