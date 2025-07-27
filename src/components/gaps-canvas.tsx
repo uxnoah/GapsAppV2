@@ -234,6 +234,7 @@ export const GapsCanvas = () => {
 
   // Item management functions
   const handleAddItem = (section: GapsSection) => {
+    console.log('🎯 ADD ITEM TRIGGERED for section:', section)
     const newItem = createGapsItem('New thought', section)
     const sectionItems = getItemsBySection(diagram.items, section)
     newItem.order = sectionItems.length
@@ -251,6 +252,7 @@ export const GapsCanvas = () => {
     setEditText('New thought')
     
     // Save to database
+    console.log('🎯 Scheduling save for ADD ITEM...')
     setTimeout(() => saveDiagramToAPI(updatedDiagram), 100)
   }
 
@@ -273,6 +275,7 @@ export const GapsCanvas = () => {
   }
 
   const handleSaveEdit = (itemId: string) => {
+    console.log('🎯 SAVE EDIT TRIGGERED for item:', itemId, 'with text:', editText)
     const updatedDiagram = {
       ...diagram,
       items: diagram.items.map(item => 
@@ -288,6 +291,7 @@ export const GapsCanvas = () => {
     setEditText('')
     
     // Save to database
+    console.log('🎯 Scheduling save for EDIT...')
     setTimeout(() => saveDiagramToAPI(updatedDiagram), 100)
   }
 
@@ -352,7 +356,8 @@ export const GapsCanvas = () => {
   const saveDiagramToAPI = async (diagramToSave?: GapsDiagram) => {
     try {
       const currentDiagram = diagramToSave || diagram
-      console.log('💾 Saving diagram to database...', currentDiagram.title)
+      console.log('🚀 SAVE TRIGGERED: Saving diagram to database...', currentDiagram.title)
+      console.log('🚀 Current diagram items count:', currentDiagram.items.length)
 
       // Convert diagram format to API format
       const apiData = {
@@ -363,19 +368,25 @@ export const GapsCanvas = () => {
         plan: getItemsBySection(currentDiagram.items, 'plan').map(item => item.text)
       }
 
+      console.log('🚀 API Data being sent:', apiData)
+
       const response = await fetch('/api/diagram', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(apiData)
       })
 
+      console.log('🚀 Response status:', response.status)
+
       if (response.ok) {
-        console.log('💾 Successfully saved to database')
+        console.log('✅ Successfully saved to database')
       } else {
-        console.error('💾 Failed to save to database:', response.status)
+        console.error('❌ Failed to save to database:', response.status)
+        const errorText = await response.text()
+        console.error('❌ Error details:', errorText)
       }
     } catch (error) {
-      console.error('💾 Error saving to database:', error)
+      console.error('❌ Error saving to database:', error)
     }
   }
 
@@ -436,6 +447,7 @@ export const GapsCanvas = () => {
   }
 
   const handleDrop = (e: React.DragEvent, targetSection: GapsSection) => {
+    console.log('🎯 DROP TRIGGERED to section:', targetSection)
     e.preventDefault()
     setDropIndicator(null)
     
@@ -462,6 +474,7 @@ export const GapsCanvas = () => {
       setDiagram(updatedDiagram)
       
       // Save to database
+      console.log('🎯 Scheduling save for DROP...')
       setTimeout(() => saveDiagramToAPI(updatedDiagram), 100)
     } catch (error) {
       console.error('Error parsing drag data:', error)
@@ -536,10 +549,21 @@ export const GapsCanvas = () => {
       })
       
       // Save to database after state update
-      setTimeout(() => saveDiagramToAPI(), 100)
+      setTimeout(() => {
+        setDiagram(currentDiagram => {
+          saveDiagramToAPI(currentDiagram)
+          return currentDiagram
+        })
+      }, 100)
     } catch (error) {
       console.error('Error parsing drag data:', error)
     }
+  }
+
+  // Manual test function for debugging
+  const testSave = () => {
+    console.log('🧪 MANUAL TEST SAVE TRIGGERED')
+    saveDiagramToAPI()
   }
 
   const sections: GapsSection[] = ['status', 'goal', 'analysis', 'plan']
@@ -578,6 +602,13 @@ export const GapsCanvas = () => {
                 title="Send test data to API"
               >
                 🧪 Test Data
+              </button>
+              <button
+                onClick={testSave}
+                className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors ml-2"
+                title="Test saving current state to database"
+              >
+                💾 Test Save
               </button>
             </div>
             <div className="flex-1"></div>
