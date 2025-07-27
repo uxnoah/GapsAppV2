@@ -56,3 +56,5 @@ logs/
 
 # SWC
 .swc/ 
+/generated/prisma
+mels-gaps/

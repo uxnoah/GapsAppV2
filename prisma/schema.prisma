@@ -1,0 +1,147 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// User Model - Authentication and Profile
+model User {
+  id          Int       @id @default(autoincrement())
+  username    String    @unique
+  email       String    @unique
+  passwordHash String   @map("password_hash")
+  isAdmin     Boolean   @default(false) @map("is_admin")
+  
+  // Flexible profile fields
+  displayName String?   @map("display_name")
+  avatarUrl   String?   @map("avatar_url")
+  preferences Json?     // Flexible user preferences storage
+  
+  // Timestamps
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  lastLoginAt DateTime? @map("last_login_at")
+  
+  // Relations
+  boards      Board[]
+  conversationTurns ConversationTurn[]
+  meetingMinutes MeetingMinute[]
+  
+  @@map("users")
+}
+
+// Board Model - GAPS Diagrams  
+model Board {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?  // Optional board description
+  
+  // User ownership
+  userId      Int      @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Board settings and metadata
+  isTemplate  Boolean  @default(false) @map("is_template")
+  isPublic    Boolean  @default(false) @map("is_public")
+  shareCode   String?  @unique @map("share_code") // For sharing boards
+  settings    Json?    // Flexible board configuration
+  metadata    Json?    // Extensible metadata storage
+  
+  // Timestamps
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  thoughts    Thought[]
+  meetingMinutes MeetingMinute[]
+  conversationTurns ConversationTurn[]
+  
+  @@map("boards")
+}
+
+// Thought Model - Individual GAPS items
+model Thought {
+  id        Int      @id @default(autoincrement())
+  content   String
+  quadrant  String   // status, goal, analysis, plan
+  
+  // Board ownership
+  boardId   Int      @map("board_id")
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  
+  // Positioning and organization
+  position  Int?     // Order within quadrant
+  tags      Json?    // Flexible tagging system
+  priority  String?  // low, medium, high
+  status    String?  // e.g., "pending", "in_progress", "completed"
+  
+  // AI and collaboration features
+  aiGenerated Boolean @default(false) @map("ai_generated")
+  confidence  Float?  // AI confidence score if applicable
+  metadata    Json?   // Extensible metadata
+  
+  // Timestamps
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  @@map("thoughts")
+}
+
+// MeetingMinute Model - Activity and change tracking
+model MeetingMinute {
+  id        Int      @id @default(autoincrement())
+  action    String   // add, edit, delete, move, ai_suggest, etc.
+  detail    String   // Description of the action
+  
+  // Board context
+  boardId   Int      @map("board_id")
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  
+  // Optional user context (for collaboration)
+  userId    Int?     @map("user_id")
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  // Change tracking
+  entityType String? @map("entity_type") // thought, board, etc.
+  entityId   Int?    @map("entity_id")   // ID of changed entity
+  oldValue   Json?   @map("old_value")   // Previous state
+  newValue   Json?   @map("new_value")   // New state
+  
+  // Session and metadata
+  sessionId  String? @map("session_id")  // Group related actions
+  metadata   Json?   // Additional context
+  
+  timestamp DateTime @default(now())
+  
+  @@map("meeting_minutes")
+}
+
+// ConversationTurn Model - AI chat history
+model ConversationTurn {
+  id      Int    @id @default(autoincrement())
+  role    String // user, assistant, system
+  content String
+  
+  // Context
+  boardId Int?   @map("board_id")
+  board   Board? @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  
+  userId  Int?   @map("user_id")
+  user    User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  // AI metadata
+  model     String? // which AI model was used
+  tokens    Int?    // token count if available
+  metadata  Json?   // Additional AI context
+  
+  timestamp DateTime @default(now())
+  
+  @@map("conversation_turns")
+}
