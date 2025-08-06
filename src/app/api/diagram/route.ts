@@ -60,12 +60,13 @@ async function getOrCreateDefaultUser() {
       console.log('🏗️ Creating default user for demo')
       // Create default user
       const hashedPassword = await bcrypt.hash('demo-password', 10)
-      user = await createUser({
+      const newUser = await createUser({
         username: 'demo-user',
         email: DEFAULT_USER_EMAIL,
         passwordHash: hashedPassword,
         isAdmin: false
       })
+      user = await getUserByEmail(DEFAULT_USER_EMAIL)
     }
     
     return user
@@ -112,36 +113,38 @@ function convertDatabaseToApiFormat(board: any): any {
   if (!board || !board.thoughts) {
     return {
       title: DEFAULT_BOARD_TITLE,
-      status: [],
-      goal: [],
-      analysis: [],
-      plan: []
+      thoughts: []
     }
   }
 
-  // Group thoughts by quadrant and sort by position
-  const groupedThoughts = {
-    status: board.thoughts
-      .filter((t: any) => t.quadrant === 'status')
-      .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
-      .map((t: any) => t.content),
-    goal: board.thoughts
-      .filter((t: any) => t.quadrant === 'goal')
-      .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
-      .map((t: any) => t.content),
-    analysis: board.thoughts
-      .filter((t: any) => t.quadrant === 'analysis')
-      .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
-      .map((t: any) => t.content),
-    plan: board.thoughts
-      .filter((t: any) => t.quadrant === 'plan')
-      .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
-      .map((t: any) => t.content)
-  }
+  // Convert thoughts to frontend GapsItem format with real database IDs and full metadata
+  const thoughts = board.thoughts
+    .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
+    .map((t: any) => ({
+      id: t.id.toString(), // Convert database ID to string
+      text: t.content,
+      section: t.section, // database section -> frontend section
+      order: t.position || 0,
+      
+      // Metadata and organization
+      tags: t.tags || [],
+      priority: t.priority,
+      status: t.status,
+      
+      // AI and collaboration
+      aiGenerated: t.aiGenerated || false,
+      confidence: t.confidence,
+      metadata: t.metadata,
+      
+      // Timestamps
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt
+    }))
 
   return {
+    id: board.id, // Add board ID to response
     title: board.title,
-    ...groupedThoughts
+    thoughts: thoughts
   }
 }
 
@@ -167,6 +170,9 @@ export async function GET() {
     
     // Get or create default user and board
     const user = await getOrCreateDefaultUser()
+    if (!user) {
+      throw new Error('Failed to get or create user')
+    }
     const board = await getOrCreateDefaultBoard(user.id)
     
     console.log('🔥 Loaded board:', board?.title, 'with', board?.thoughts?.length || 0, 'thoughts')
@@ -243,6 +249,9 @@ export async function PUT(request: NextRequest) {
     // GET OR CREATE USER AND BOARD
     // ============================
     const user = await getOrCreateDefaultUser()
+    if (!user) {
+      throw new Error('Failed to get or create user')
+    }
     const board = await getOrCreateDefaultBoard(user.id)
     
     if (!board) {
@@ -268,23 +277,23 @@ export async function PUT(request: NextRequest) {
       })
       console.log('🔥 Deleted existing thoughts')
 
-      // Create new thoughts for each quadrant
-      const thoughtsToCreate = []
+      // Create new thoughts for each section
+      const thoughtsToCreate: any[] = []
 
-      // Process each quadrant
-      const quadrantData = [
-        { array: status, quadrant: 'status' },
-        { array: goal, quadrant: 'goal' },
-        { array: analysis, quadrant: 'analysis' },
-        { array: plan, quadrant: 'plan' }
+      // Process each section
+      const sectionData = [
+        { array: status, section: 'status' },
+        { array: goal, section: 'goal' },
+        { array: analysis, section: 'analysis' },
+        { array: plan, section: 'plan' }
       ]
 
-      for (const { array, quadrant } of quadrantData) {
+      for (const { array, section } of sectionData) {
         array.forEach((text: string, index: number) => {
           if (typeof text === 'string' && text.trim()) {
             thoughtsToCreate.push({
               content: text.trim(),
-              quadrant: quadrant,
+              section: section,
               boardId: board.id,
               position: index,
               aiGenerated: true, // Mark as AI generated since it came via API

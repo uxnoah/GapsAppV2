@@ -7,10 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "jest",
-    "test:watch": "jest --watch"
+    "test": "jest --config=config/jest.config.js",
+    "test:watch": "jest --watch --config=config/jest.config.js"
   },
   "dependencies": {
+    "@next/swc-darwin-arm64": "^15.4.5",
     "@prisma/client": "^6.12.0",
     "@vercel/kv": "^3.0.0",
     "bcryptjs": "^3.0.2",

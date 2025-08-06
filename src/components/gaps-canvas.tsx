@@ -6,138 +6,189 @@ import {
   createDefaultDiagram, 
   createGapsItem, 
   getItemsBySection, 
-  getSectionColors,
   getSectionDisplayName,
   generateId 
 } from '@/lib/utils'
 import { GapsBox } from './gaps-box'
 import { GapsItemComponent } from './gaps-item'
 
+
+/**
+ * 🧠 MY THOUGHTS: 
+ * ❓ QUESTION: 
+ * 💡 IDEA: 
+ * 📝 NOTE: 
+ */
+
+/**
+ * GAPS Canvas Component - Main Application Container
+ * 
+ * This is the core component that orchestrates the entire GAPS diagram application.
+ * It manages the state, handles all user interactions, and coordinates between
+ * the UI components and the backend API.
+ * 
+ * Architecture Overview:
+ * - State Management: Manages all application state (diagram data, UI state, etc.)
+ * - API Integration: Handles all communication with the backend
+ * - Event Handling: Processes all user interactions (drag/drop, editing, etc.)
+ * - Component Coordination: Orchestrates the four GAPS boxes and individual items
+ * 
+ * Key Responsibilities:
+ * 1. Load and save diagram data to/from the database
+ * 2. Handle drag-and-drop operations between sections
+ * 3. Manage inline editing of items and titles
+ * 4. Coordinate AI simulation and external updates
+ * 5. Provide debugging and testing functionality
+ */
+
+// =============================================================================
+// INTERFACE DEFINITIONS
+// =============================================================================
+
+// 🧠 MY THOUGHTS: 
+// ❓ QUESTION: 
+
+// Data structure for tracking drag operations
 interface DragData {
   itemId: string
   sourceSection: GapsSection
   sourceIndex: number
 }
 
+// Visual indicator for showing where items can be dropped
 interface DropIndicator {
   section: GapsSection
   index: number
 }
 
 export const GapsCanvas = () => {
-  // Initialize with empty diagram - will load from API
-  const [diagram, setDiagram] = useState<GapsDiagram>(() => {
-    const initialDiagram = createDefaultDiagram()
-    initialDiagram.title = "GAPS Diagram"
-    initialDiagram.items = []
-    return initialDiagram
-  })
 
-  const [editingItemId, setEditingItemId] = useState<string | null>(null)
-  const [editText, setEditText] = useState('')
-  const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null)
-  const [editingMainTitle, setEditingMainTitle] = useState(false)
-  const [editMainTitleText, setEditMainTitleText] = useState('')
-  const [titleClickPosition, setTitleClickPosition] = useState<number | null>(null)
 
-  const titleInputRef = React.useRef<HTMLInputElement>(null)
-  const titleSpanRef = React.useRef<HTMLHeadingElement>(null)
+  // =============================================================================
+  // STATE MANAGEMENT
+  // =============================================================================
+  
+  // 🧠 MY THOUGHTS: The state is organized into logical groups - core data, UI state, and DOM refs
+  // 💡 IDEA: We could use a custom hook to manage related state together
+  // 📝 NOTE: Each state variable has a clear purpose - this makes debugging easier
+  
+  // Default diagram for loading state
+  const defaultDiagram: GapsDiagram = {
+    id: 'loading',
+    title: 'Loading...',
+    items: [],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    version: 1
+  }
 
-  // Load data on component mount and set up periodic refresh for external updates
-  React.useEffect(() => {
-    loadDiagramFromAPI()
-    
-    // Check for external updates every 10 seconds (less aggressive than before)
-    const interval = setInterval(() => {
-      loadDiagramFromAPI()
-    }, 10000)
-    
-    return () => clearInterval(interval)
-  }, [])
+  // Core diagram data - the main application state
+  const [diagram, setDiagram] = useState<GapsDiagram>(defaultDiagram)
 
-  // Load initial data from API
+  // UI State - controls various interface behaviors
+  const [editingItemId, setEditingItemId] = useState<string | null>(null)  // Which item is being edited
+  const [editText, setEditText] = useState('')                             // Current edit text
+  const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null)  // Drag/drop visual feedback
+  const [editingMainTitle, setEditingMainTitle] = useState(false)         // Main title editing state
+  const [editMainTitleText, setEditMainTitleText] = useState('')          // Main title edit text
+  const [titleClickPosition, setTitleClickPosition] = useState<number | null>(null)  // Cursor position for title editing
+  const [isDragging, setIsDragging] = useState(false)                     // Global drag state
+  const [isThinking, setIsThinking] = useState(false)                     // AI processing overlay
+
+  // DOM References - for programmatic access to elements
+  const titleInputRef = React.useRef<HTMLInputElement>(null)  // Main title input field
+  const titleSpanRef = React.useRef<HTMLHeadingElement>(null) // Main title display element
+
+  // =============================================================================
+  // API INTEGRATION FUNCTIONS
+  // =============================================================================
+
+  /*
+   * 💡 IDEA We could add a loading spinner while data is being fetched
+   * 🔧 TODO Add better error handling and logging
+   * Loads the current diagram data from the backend API
+   * This function fetches the complete diagram state including all thoughts/items
+   * and their metadata from the database.
+   */
   const loadDiagramFromAPI = async () => {
     try {
-      console.log('🎯 Loading diagram from /api/diagram...')
-      // Use relative path - works in any environment (localhost, staging, production)
       const response = await fetch('/api/diagram')
-      console.log('🎯 Response status:', response.status)
       
       if (response.ok) {
         const data = await response.json()
-        // Convert API response to diagram format
-        const items: GapsItem[] = []
-        let idCounter = 1
+        // Use the thoughts directly from database with real IDs and full metadata
+        const items: GapsItem[] = data.thoughts ? data.thoughts.map((thought: any) => ({
+          id: thought.id, // Real database ID
+          text: thought.text,
+          section: thought.section,
+          order: thought.order,
+          
+          // Metadata and organization
+          tags: thought.tags || [],
+          priority: thought.priority,
+          status: thought.status,
+          
+          // AI and collaboration
+          aiGenerated: thought.aiGenerated || false,
+          confidence: thought.confidence,
+          metadata: thought.metadata,
+          
+          // Timestamps
+          createdAt: new Date(thought.createdAt),
+          updatedAt: new Date(thought.updatedAt)
+        })) : []
 
-        // Add status items
-        data.status?.forEach((text: string, index: number) => {
-          items.push({
-            id: `status-${idCounter++}`,
-            text,
-            section: 'status',
-            order: index,
-            createdAt: new Date(),
-            updatedAt: new Date()
-          })
-        })
-
-        // Add goal items
-        data.goal?.forEach((text: string, index: number) => {
-          items.push({
-            id: `goal-${idCounter++}`,
-            text,
-            section: 'goal',
-            order: index,
-            createdAt: new Date(),
-            updatedAt: new Date()
-          })
-        })
-
-        // Add analysis items
-        data.analysis?.forEach((text: string, index: number) => {
-          items.push({
-            id: `analysis-${idCounter++}`,
-            text,
-            section: 'analysis',
-            order: index,
-            createdAt: new Date(),
-            updatedAt: new Date()
-          })
-        })
-
-        // Add plan items
-        data.plan?.forEach((text: string, index: number) => {
-          items.push({
-            id: `plan-${idCounter++}`,
-            text,
-            section: 'plan',
-            order: index,
-            createdAt: new Date(),
-            updatedAt: new Date()
-          })
-        })
-
-        console.log('🎯 Loaded', items.length, 'items from API')
-
-        setDiagram(prev => ({
-          ...prev,
-          title: data.title || '',
+        setDiagram({
+          id: data.id || generateId(), // Use API ID or generate new one
+          title: data.title || 'GAPS Diagram',
           items,
-          updatedAt: new Date()
-        }))
-      } else {
-        console.log('🎯 Response not ok:', response.status, response.statusText)
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          version: 1
+        })
       }
     } catch (error) {
-      console.error('🎯 Failed to load diagram from API:', error)
+      console.error('Failed to load diagram from API:', error)
     }
   }
 
-  // Test function to send sample data to API
+  // ===== INITIALIZATION =====
+  
+  // Load data on component mount
+  React.useEffect(() => {
+    loadDiagramFromAPI()
+  }, [])
+
+  // Set cursor position when title input becomes active
+  React.useEffect(() => {
+    if (editingMainTitle && titleInputRef.current && titleClickPosition !== null) {
+      setTimeout(() => {
+        if (titleInputRef.current) {
+          titleInputRef.current.setSelectionRange(titleClickPosition, titleClickPosition)
+        }
+      }, 0)
+    }
+  }, [editingMainTitle, titleClickPosition])
+
+  // Show loading state while diagram is still default
+  if (diagram.id === 'loading' && diagram.items.length === 0) {
+    return <div className="flex items-center justify-center min-h-screen">Loading...</div>
+  }
+
+  // ===== TESTING AND SIMULATION FUNCTIONS =====
+  
+  /**
+   * Test function to send sample data to API
+   * This simulates loading test data into the diagram for development/testing purposes
+   */
   const sendTestDataToAPI = async () => {
+    console.log('💬 User: "Load some test data into my diagram"')
+    setIsThinking(true)
+    
+    // Simulate AI processing time
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    
     try {
-      console.log('🧪 Sending test data to API...')
-      
       const testData = {
         title: 'Test Data from Frontend',
         status: ['Status item 1', 'Status item 2'],
@@ -154,16 +205,11 @@ export const GapsCanvas = () => {
         body: JSON.stringify(testData)
       })
       
-      console.log('🧪 PUT Response status:', response.status)
-      
       if (response.ok) {
         const result = await response.json()
-        console.log('🧪 PUT Response:', JSON.stringify(result, null, 2))
-        
+
         // Use the response data directly to update the frontend
         if (result.success && result.diagram) {
-          console.log('🧪 Using PUT response data to update frontend...')
-          
           const diagramData = result.diagram
           const items: GapsItem[] = []
           let idCounter = 1
@@ -213,60 +259,417 @@ export const GapsCanvas = () => {
             })
           })
 
-          setDiagram(prev => ({
-            ...prev,
-            title: diagramData.title || '',
-            items,
-            updatedAt: new Date()
-          }))
-          
-          console.log('🧪 Frontend updated with', items.length, 'items')
+                  setDiagram(prev => ({
+          ...prev,
+          title: diagramData.title || '',
+          items,
+          updatedAt: new Date()
+        }))
         }
+        
+        // AI notifies completion
+        await fetch('/api/ai-notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hasChanges: true,
+            message: 'Test data loaded into diagram'
+          })
+        })
+        
+        setIsThinking(false)
+        console.log('🤖 AI: "I\'ve loaded test data into your diagram!"')
       } else {
         console.error('🧪 PUT request failed:', response.status, response.statusText)
+        setIsThinking(false)
       }
     } catch (error) {
       console.error('🧪 Error sending test data:', error)
+      setIsThinking(false)
     }
   }
 
+  // API Simulation Functions
+  const simulateAddThought = async () => {
+    console.log('💬 User: "Add a new thought to my diagram"')
+    setIsThinking(true)
+    
+    // Simulate AI processing time
+    await new Promise(resolve => setTimeout(resolve, 900))
+    
+    try {
+      // Simulate external API call to add a thought
+      const response = await fetch('/api/thoughts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          content: `AI Suggestion: Optimize database queries (${new Date().toLocaleTimeString()})`,
+          section: 'plan',
+          aiGenerated: true,
+          confidence: 0.85,
+          tags: ['ai-generated', 'performance'],
+          priority: 'medium'
+        })
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
 
+        // Refresh diagram to show the change (simulating external update)
+        await loadDiagramFromAPI()
+        
+        // AI notifies completion
+        await fetch('/api/ai-notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hasChanges: true,
+            message: 'New thought added to diagram'
+          })
+        })
+        
+        setIsThinking(false)
+        console.log('🤖 AI: "I\'ve added a new thought to your diagram!"')
+      } else {
+        console.error('❌ Simulated API add failed:', response.status)
+        setIsThinking(false)
+      }
+    } catch (error) {
+      console.error('❌ Error in simulated add:', error)
+      setIsThinking(false)
+    }
+  }
+
+  const simulateEditThought = async () => {
+    console.log('💬 User: "Edit one of my thoughts"')
+    setIsThinking(true)
+    
+    // Simulate AI processing time
+    await new Promise(resolve => setTimeout(resolve, 750))
+    
+    // Find any thought to edit
+    const existingThoughts = diagram.items.filter(item => item.id && !isNaN(Number(item.id)))
+    
+    if (existingThoughts.length === 0) {
+      setIsThinking(false)
+      return
+    }
+    
+    const randomThought = existingThoughts[Math.floor(Math.random() * existingThoughts.length)]
+    
+    try {
+      // Simulate external API call to edit a thought
+      const response = await fetch(`/api/thoughts/${randomThought.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          content: `${randomThought.text} (AI Enhanced: ${new Date().toLocaleTimeString()})`,
+          priority: 'high',
+          tags: ['ai-enhanced', 'updated'],
+          confidence: 0.92
+        })
+      })
+      
+      if (response.ok) {
+        // Refresh diagram to show the change
+        await loadDiagramFromAPI()
+        
+        // AI notifies completion
+        await fetch('/api/ai-notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hasChanges: true,
+            message: 'Thought edited successfully'
+          })
+        })
+        
+        setIsThinking(false)
+        console.log('🤖 AI: "I\'ve enhanced one of your thoughts!"')
+      } else {
+        console.error('❌ Simulated API edit failed:', response.status)
+        setIsThinking(false)
+      }
+    } catch (error) {
+      console.error('❌ Error in simulated edit:', error)
+      setIsThinking(false)
+    }
+  }
+
+  const simulateDeleteThought = async () => {
+    console.log('💬 User: "Delete one of my thoughts"')
+    setIsThinking(true)
+    
+    // Simulate AI processing time
+    await new Promise(resolve => setTimeout(resolve, 600))
+    
+    // Find any thought to delete
+    const existingThoughts = diagram.items.filter(item => item.id && !isNaN(Number(item.id)))
+    
+    if (existingThoughts.length === 0) {
+      setIsThinking(false)
+      return
+    }
+    
+    const randomThought = existingThoughts[Math.floor(Math.random() * existingThoughts.length)]
+    console.log('🗑️ Deleting thought:', randomThought.id, randomThought.text.substring(0, 30))
+    
+    try {
+      // Simulate external API call to delete a thought
+      const response = await fetch(`/api/thoughts/${randomThought.id}`, {
+        method: 'DELETE'
+      })
+      
+      if (response.ok) {
+        console.log('✅ Delete successful')
+        // Refresh diagram to show the change
+        await loadDiagramFromAPI()
+        
+        // AI notifies completion
+        await fetch('/api/ai-notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hasChanges: true,
+            message: 'Thought deleted successfully'
+          })
+        })
+        
+        setIsThinking(false)
+        console.log('🤖 AI: "I\'ve removed that thought from your diagram!"')
+      } else {
+        const errorText = await response.text()
+        console.error('❌ Simulated API delete failed:', response.status, errorText)
+        setIsThinking(false)
+      }
+    } catch (error) {
+      console.error('❌ Error in simulated delete:', error)
+      setIsThinking(false)
+    }
+  }
+
+  const simulateMoveThought = async () => {
+    console.log('💬 User: "Move one of my thoughts to a different section"')
+    setIsThinking(true)
+    
+    // Simulate AI processing time
+    await new Promise(resolve => setTimeout(resolve, 800))
+    
+    // Find any thought to move
+    const existingThoughts = diagram.items.filter(item => item.id && !isNaN(Number(item.id)))
+    
+    if (existingThoughts.length === 0) {
+      setIsThinking(false)
+      return
+    }
+    
+    const randomThought = existingThoughts[Math.floor(Math.random() * existingThoughts.length)]
+    const sections = ['status', 'goal', 'analysis', 'plan']
+    const targetSection = sections[Math.floor(Math.random() * sections.length)]
+    const targetIndex = Math.floor(Math.random() * 3) // Random position 0-2
+    
+    console.log(`🔄 Moving thought ${randomThought.id} from ${randomThought.section} to ${targetSection} at index ${targetIndex}`)
+    
+    try {
+      // Simulate external API call to move a thought
+      const response = await fetch(`/api/thoughts/${randomThought.id}/move`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetSection,
+          targetIndex
+        })
+      })
+      
+      if (response.ok) {
+        console.log('✅ Move successful')
+        // Refresh diagram to show the change
+        await loadDiagramFromAPI()
+        
+        // AI notifies completion
+        await fetch('/api/ai-notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hasChanges: true,
+            message: 'Thought moved successfully'
+          })
+        })
+        
+        setIsThinking(false)
+        console.log('🤖 AI: "I\'ve moved that thought to a better location!"')
+      } else {
+        const errorText = await response.text()
+        console.error('❌ Simulated API move failed:', response.status, errorText)
+        setIsThinking(false)
+      }
+    } catch (error) {
+      console.error('❌ Error in simulated move:', error)
+      setIsThinking(false)
+    }
+  }
+
+  const simulateAIChanges = async () => {
+    console.log('💬 User: "Analyze my diagram and suggest improvements"')
+    setIsThinking(true)
+    
+    // Simulate AI processing time
+    await new Promise(resolve => setTimeout(resolve, 1500))
+    
+    try {
+      // Simulate AI analyzing current state and making multiple suggestions
+      const changes = [
+        {
+          action: 'add',
+          data: {
+            content: `AI Analysis: Based on current status, I suggest implementing caching (${new Date().toLocaleTimeString()})`,
+            section: 'analysis',
+            aiGenerated: true,
+            confidence: 0.78,
+            tags: ['ai-analysis', 'caching'],
+            priority: 'high'
+          }
+        },
+        {
+          action: 'add',
+          data: {
+            content: `AI Goal: Reduce response time to under 200ms (${new Date().toLocaleTimeString()})`,
+            section: 'goal',
+            aiGenerated: true,
+            confidence: 0.89,
+            tags: ['ai-goal', 'performance'],
+            priority: 'high'
+          }
+        },
+        {
+          action: 'add',
+          data: {
+            content: `AI Action Plan: 1) Profile queries 2) Add indexes 3) Implement Redis cache (${new Date().toLocaleTimeString()})`,
+            section: 'plan',
+            aiGenerated: true,
+            confidence: 0.95,
+            tags: ['ai-plan', 'step-by-step'],
+            priority: 'medium'
+          }
+        }
+      ]
+
+      // Execute changes sequentially to show AI "thinking"
+      for (let i = 0; i < changes.length; i++) {
+        const change = changes[i]
+
+        const response = await fetch('/api/thoughts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(change.data)
+        })
+        
+        if (response.ok) {
+          const result = await response.json()
+        }
+        
+        // Small delay between AI actions to show progression
+        await new Promise(resolve => setTimeout(resolve, 800))
+      }
+      
+      // Final refresh to show all AI changes
+      await loadDiagramFromAPI()
+      
+      // AI notifies completion
+      await fetch('/api/ai-notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          hasChanges: true,
+          message: 'AI analysis complete with 3 new suggestions'
+        })
+      })
+      
+      setIsThinking(false)
+      console.log('🤖 AI: "I\'ve analyzed your diagram and added 3 helpful suggestions!"')
+      
+    } catch (error) {
+      console.error('❌ Error in AI simulation:', error)
+      setIsThinking(false)
+    }
+  }
 
   // Item management functions
-  const handleAddItem = (section: GapsSection) => {
+  const handleAddItem = async (section: GapsSection) => {
     console.log('🎯 ADD ITEM TRIGGERED for section:', section)
-    const newItem = createGapsItem('New thought', section)
-    const sectionItems = getItemsBySection(diagram.items, section)
-    newItem.order = sectionItems.length
     
-    const updatedDiagram = {
-      ...diagram,
-      items: [...diagram.items, newItem],
-      updatedAt: new Date(),
-      version: diagram.version + 1
+    try {
+      // Call granular API to add thought
+      const response = await fetch('/api/thoughts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'New thought', section })
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        console.log('✅ Created thought via API:', result.thought.id)
+        
+        // Add to local state with real database ID
+        const newItem: GapsItem = {
+          id: result.thought.id.toString(),
+          text: result.thought.content,    // API sends 'content', we use as 'text'
+          section: result.thought.section,
+          order: result.thought.order,
+          createdAt: new Date(result.thought.createdAt),
+          updatedAt: new Date(result.thought.updatedAt)
+        }
+        
+        setDiagram(prev => ({
+          ...prev,
+          items: [...prev.items, newItem].sort((a, b) => {
+            // Sort by section first, then by order within section
+            if (a.section !== b.section) {
+              const sectionOrder = ['status', 'goal', 'analysis', 'plan']
+              return sectionOrder.indexOf(a.section) - sectionOrder.indexOf(b.section)
+            }
+            return a.order - b.order
+          }),
+          updatedAt: new Date(),
+          version: prev.version + 1
+        }))
+        
+        // Automatically start editing the new item
+        setEditingItemId(newItem.id)
+        setEditText('New thought')
+      } else {
+        console.error('❌ Failed to create thought:', response.status)
+      }
+    } catch (error) {
+      console.error('❌ Error creating thought:', error)
     }
-    setDiagram(updatedDiagram)
-    
-    // Automatically start editing the new item with text selected
-    setEditingItemId(newItem.id)
-    setEditText('New thought')
-    
-    // Save to database
-    console.log('🎯 Scheduling save for ADD ITEM...')
-    setTimeout(() => saveDiagramToAPI(updatedDiagram), 100)
   }
 
-  const handleRemoveItem = (itemId: string) => {
-    const updatedDiagram = {
-      ...diagram,
-      items: diagram.items.filter(item => item.id !== itemId),
-      updatedAt: new Date(),
-      version: diagram.version + 1
-    }
-    setDiagram(updatedDiagram)
+  const handleRemoveItem = async (itemId: string) => {
+    console.log('🎯 REMOVE ITEM TRIGGERED for item:', itemId)
     
-    // Save to database
-    setTimeout(() => saveDiagramToAPI(updatedDiagram), 100)
+    try {
+      // Call granular API to delete thought
+      const response = await fetch(`/api/thoughts/${itemId}`, {
+        method: 'DELETE'
+      })
+      
+      if (response.ok) {
+        console.log('✅ Deleted thought via API:', itemId)
+        
+        // Update local state
+        setDiagram(prev => ({
+          ...prev,
+          items: prev.items.filter(item => item.id !== itemId),
+          updatedAt: new Date(),
+          version: prev.version + 1
+        }))
+      } else {
+        console.error('❌ Failed to delete thought:', response.status)
+      }
+    } catch (error) {
+      console.error('❌ Error deleting thought:', error)
+    }
   }
 
   const handleStartEdit = (item: GapsItem) => {
@@ -274,25 +677,41 @@ export const GapsCanvas = () => {
     setEditText(item.text)
   }
 
-  const handleSaveEdit = (itemId: string) => {
+  const handleSaveEdit = async (itemId: string) => {
     console.log('🎯 SAVE EDIT TRIGGERED for item:', itemId, 'with text:', editText)
-    const updatedDiagram = {
-      ...diagram,
-      items: diagram.items.map(item => 
-        item.id === itemId 
-          ? { ...item, text: editText, updatedAt: new Date() }
-          : item
-      ),
-      updatedAt: new Date(),
-      version: diagram.version + 1
-    }
-    setDiagram(updatedDiagram)
-    setEditingItemId(null)
-    setEditText('')
     
-    // Save to database
-    console.log('🎯 Scheduling save for EDIT...')
-    setTimeout(() => saveDiagramToAPI(updatedDiagram), 100)
+    try {
+      // Call granular API to update thought content
+      const response = await fetch(`/api/thoughts/${itemId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: editText })
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        console.log('✅ Updated thought via API:', itemId)
+        
+        // Update local state
+        setDiagram(prev => ({
+          ...prev,
+          items: prev.items.map(item => 
+            item.id === itemId 
+              ? { ...item, text: editText, updatedAt: new Date(result.thought.updatedAt) }
+              : item
+          ),
+          updatedAt: new Date(),
+          version: prev.version + 1
+        }))
+        
+        setEditingItemId(null)
+        setEditText('')
+      } else {
+        console.error('❌ Failed to update thought:', response.status)
+      }
+    } catch (error) {
+      console.error('❌ Error updating thought:', error)
+    }
   }
 
   const handleCancelEdit = () => {
@@ -340,17 +759,6 @@ export const GapsCanvas = () => {
     setEditingMainTitle(true)
     setEditMainTitleText(diagram.title)
   }
-
-  // Set cursor position when title input becomes active
-  React.useEffect(() => {
-    if (editingMainTitle && titleInputRef.current && titleClickPosition !== null) {
-      setTimeout(() => {
-        if (titleInputRef.current) {
-          titleInputRef.current.setSelectionRange(titleClickPosition, titleClickPosition)
-        }
-      }, 0)
-    }
-  }, [editingMainTitle, titleClickPosition])
 
   // Save current diagram state to database
   const saveDiagramToAPI = async (diagramToSave?: GapsDiagram) => {
@@ -424,6 +832,7 @@ export const GapsCanvas = () => {
       sourceIndex
     }
     
+    setIsDragging(true) // Set dragging state
     e.dataTransfer.setData('text/plain', JSON.stringify(dragData))
     e.dataTransfer.effectAllowed = 'move'
   }
@@ -453,6 +862,7 @@ export const GapsCanvas = () => {
     console.log('🎯 HANDLE_DROP TRIGGERED to section:', targetSection)
     e.preventDefault()
     setDropIndicator(null)
+    setIsDragging(false) // Reset dragging state
     
     const dragDataText = e.dataTransfer.getData('text/plain')
     if (!dragDataText) return
@@ -483,11 +893,12 @@ export const GapsCanvas = () => {
     }
   }
 
-  const handleItemDrop = (e: React.DragEvent, targetSection: GapsSection, targetIndex: number) => {
+  const handleItemDrop = async (e: React.DragEvent, targetSection: GapsSection, targetIndex: number) => {
     console.log('🎯 HANDLE_ITEM_DROP TRIGGERED to section:', targetSection, 'index:', targetIndex)
     e.preventDefault()
     e.stopPropagation()
     setDropIndicator(null)
+    setIsDragging(false) // Reset dragging state
     
     const dragDataText = e.dataTransfer.getData('text/plain')
     if (!dragDataText) return
@@ -541,84 +952,251 @@ export const GapsCanvas = () => {
           })
         }
         
-        const updatedDiagram = {
-          ...diagram,
+        return {
+          ...prev,
           items: newItems,
           updatedAt: new Date(),
-          version: diagram.version + 1
+          version: prev.version + 1
         }
-        
-        return updatedDiagram
       })
       
-      // Save to database after state update
-      console.log('🎯 handleItemDrop: Scheduling save...')
-      setTimeout(() => {
-        setDiagram(currentDiagram => {
-          saveDiagramToAPI(currentDiagram)
-          return currentDiagram
+      // Call granular API to move thought
+      try {
+        const response = await fetch(`/api/thoughts/${dragData.itemId}/move`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            targetSection: targetSection, 
+            targetIndex: targetIndex 
+          })
         })
-      }, 100)
+        
+        if (response.ok) {
+          console.log('✅ Moved thought via API:', dragData.itemId)
+        } else {
+          console.error('❌ Failed to move thought:', response.status)
+          // TODO: Could implement rollback here if API fails
+        }
+      } catch (error) {
+        console.error('❌ Error moving thought:', error)
+      }
     } catch (error) {
       console.error('Error parsing drag data:', error)
     }
   }
 
-  // Manual test function for debugging
+  // Manual test functions for debugging
   const testSave = () => {
-    console.log('🧪 MANUAL TEST SAVE TRIGGERED')
-    console.log('🚀 SAVE TRIGGERED: Saving diagram to database...', diagram.title)
-    console.log('🚀 Current diagram items count:', diagram.items.length)
+    console.log('🧪 MANUAL SAVE: Saving entire diagram to database')
     saveDiagramToAPI()
+  }
+
+  const testLoad = () => {
+    console.log('🧪 MANUAL LOAD: Loading diagram from database')
+    loadDiagramFromAPI()
+  }
+
+  // AI Simulation - Bulk Update (simulates real chat flow)
+  const simulateAIBulkUpdate = async () => {
+    console.log('🤖 AI BULK: Simulating user chat -> AI response flow')
+    
+    // Step 1: User sends message (show thinking overlay)
+    setIsThinking(true)
+    console.log('💬 User: "Please update my diagram with performance improvements"')
+    
+    // Step 2: AI processes (simulate thinking time)
+    await new Promise(resolve => setTimeout(resolve, 1500))
+    
+    const aiDiagramData = {
+      title: "AI Enhanced Diagram",
+      status: [
+        "Current system performance baseline established",
+        "User feedback collected and analyzed"
+      ],
+      goal: [
+        "Improve response time by 50%",
+        "Increase user satisfaction to 95%",
+        "Reduce error rate to < 0.1%"
+      ],
+      analysis: [
+        "Bottleneck identified in database queries",
+        "Frontend rendering inefficiencies detected",
+        "High memory usage in background processes"
+      ],
+      plan: [
+        "Implement database indexing strategy",
+        "Optimize React component rendering",
+        "Refactor background job processing",
+        "Deploy caching layer",
+        "Monitor performance metrics"
+      ]
+    }
+
+    try {
+      // Step 3: AI makes database changes
+      const response = await fetch('/api/diagram', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(aiDiagramData)
+      })
+
+      if (response.ok) {
+        console.log('✅ AI bulk update successful')
+        
+        // Step 4: AI notifies frontend it's done
+        await fetch('/api/ai-notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hasChanges: true,
+            message: 'AI has updated your diagram with performance improvements'
+          })
+        })
+        
+        // Step 5: Frontend updates and removes thinking overlay
+        setIsThinking(false)
+        await loadDiagramFromAPI()
+        console.log('🤖 AI: "I\'ve updated your diagram with performance improvements!"')
+      } else {
+        console.error('❌ AI bulk update failed')
+        setIsThinking(false)
+      }
+    } catch (error) {
+      console.error('❌ Error in AI bulk update:', error)
+      setIsThinking(false)
+    }
+  }
+
+  // AI Simulation - Rapid Fire (simulates real chat flow with multiple changes)
+  const simulateAIRapidFire = async () => {
+    console.log('🤖 AI RAPID: Simulating user chat -> AI makes multiple changes')
+    
+    // Step 1: User sends message (show thinking overlay)
+    setIsThinking(true)
+    console.log('💬 User: "Please analyze my diagram and suggest improvements"')
+    
+    // Step 2: AI processes (simulate thinking time)
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    
+    const operations = []
+    
+    // Add multiple thoughts rapidly
+    operations.push(
+      fetch('/api/thoughts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: 'AI Added: Critical security vulnerability',
+          section: 'status',
+          priority: 'high',
+          tags: ['security', 'urgent']
+        })
+      })
+    )
+    
+    operations.push(
+      fetch('/api/thoughts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: 'AI Added: Implement zero-trust architecture',
+          section: 'plan',
+          priority: 'high',
+          tags: ['security', 'architecture']
+        })
+      })
+    )
+
+    // If we have existing thoughts, try to edit and move them
+    if (diagram.items.length > 0) {
+      const firstItem = diagram.items[0]
+      const lastItem = diagram.items[diagram.items.length - 1]
+      
+      // Edit an existing thought
+      operations.push(
+        fetch(`/api/thoughts/${firstItem.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: `${firstItem.text} (AI Enhanced)`
+          })
+        })
+      )
+      
+      // Move a thought to a different section
+      if (lastItem.section !== 'analysis') {
+        operations.push(
+          fetch(`/api/thoughts/${lastItem.id}/move`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              targetSection: 'analysis',
+              targetIndex: 0
+            })
+          })
+        )
+      }
+    }
+
+    try {
+      // Step 3: AI makes multiple database changes
+      console.log(`🔥 AI making ${operations.length} simultaneous changes...`)
+      const results = await Promise.all(operations)
+      
+      console.log('✅ AI rapid fire completed:', results.length, 'operations')
+      
+      // Step 4: AI notifies frontend it's done
+      await fetch('/api/ai-notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          hasChanges: true,
+          message: `AI has made ${results.length} improvements to your diagram`
+        })
+      })
+      
+      // Step 5: Frontend updates and removes thinking overlay
+      setIsThinking(false)
+      await loadDiagramFromAPI()
+      console.log('🤖 AI: "I\'ve analyzed your diagram and made several improvements!"')
+      
+    } catch (error) {
+      console.error('❌ Error in AI rapid fire:', error)
+      setIsThinking(false)
+    }
+  }
+
+  // Calculate dynamic buffer zone height based on item count
+  const getBufferHeight = (itemCount: number): string => {
+    if (itemCount === 0) return 'h-16' // Empty section needs space to show it can receive items
+    if (itemCount <= 2) return 'h-12' // Small sections get moderate buffer
+    if (itemCount <= 4) return 'h-8'  // Medium sections get smaller buffer  
+    return 'h-4' // Full sections get minimal buffer
   }
 
   const sections: GapsSection[] = ['status', 'goal', 'analysis', 'plan']
 
   return (
-    <div className="p-5 bg-gray-50 min-h-screen">
-      {/* Main Content: Chat + GAPS Diagram */}
-      <div className="flex gap-8 max-w-7xl mx-auto">
-        {/* Chat Section */}
-        <div className="w-1/3">
-          <iframe 
-            src="https://gapscoachv2-72392.chipp.ai" 
-            height="700px" 
-            width="100%" 
-            frameBorder="0" 
-            title="GAPS Coach V2"
-            className="rounded-lg shadow-lg"
-          />
-        </div>
-
-        {/* GAPS Diagram Section */}
-        <div className="w-2/3 bg-white rounded-lg shadow-lg p-6 pb-3">
-          {/* Title Section - Centered above diagram only */}
-          <div className="flex justify-between items-center mb-4">
-            <div className="flex gap-2">
-              <button
-                onClick={loadDiagramFromAPI}
-                className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
-                title="Refresh from API"
-              >
-                🔄 Refresh
-              </button>
-              <button
-                onClick={sendTestDataToAPI}
-                className="px-3 py-1 text-sm bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
-                title="Send test data to API"
-              >
-                🧪 Test Data
-              </button>
-              <button
-                onClick={testSave}
-                className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors ml-2"
-                title="Test saving current state to database"
-              >
-                💾 Test Save
-              </button>
+    <div className="p-5 bg-gray-50 min-h-screen relative">
+      {/* Thinking Overlay */}
+      {isThinking && (
+        <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-8 shadow-xl">
+            <div className="flex items-center space-x-3">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+              <div className="text-lg font-semibold text-gray-800">AI is thinking...</div>
             </div>
-            <div className="flex-1"></div>
+            <div className="mt-2 text-sm text-gray-600">Please wait while I process your request</div>
           </div>
+        </div>
+      )}
+      
+      <div className="max-w-7xl mx-auto flex gap-6">
+        {/* Main Content: GAPS Diagram */}
+        <div className="flex-1">
+        {/* GAPS Diagram Section */}
+        <div className="bg-white rounded-lg shadow-lg p-6 pb-3">
+
           <div className="text-center mb-4">
             {editingMainTitle ? (
               <input
@@ -651,7 +1229,7 @@ export const GapsCanvas = () => {
           </div>
 
           {/* GAPS Grid - Clean Four Boxes */}
-          <div className="grid grid-cols-2 gap-4 min-h-[600px]">
+          <div className={`grid grid-cols-2 gap-4 min-h-[400px] ${isThinking ? 'pointer-events-none opacity-50' : ''}`}>
             {/* Status Quadrant (Top Left) */}
             <div 
               className="p-6 bg-gray-50 rounded-lg border-2 border-gray-200 relative"
@@ -673,9 +1251,9 @@ export const GapsCanvas = () => {
                   const showDropIndicator = dropIndicator?.section === 'status' && dropIndicator?.index === index
                   
                   return (
-                    <div key={item.id}>
+                    <div key={item.id} className="relative">
                       {showDropIndicator && (
-                        <div className="h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse mb-1" />
+                        <div className="absolute -top-1 left-0 right-0 h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse z-10" />
                       )}
                       
                       <GapsItemComponent
@@ -696,16 +1274,16 @@ export const GapsCanvas = () => {
                   )
                 })}
                 
-                {dropIndicator?.section === 'status' && dropIndicator?.index === getItemsBySection(diagram.items, 'status').length && (
-                  <div className="h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse" />
-                )}
-                
                 <div
-                  className="h-16 opacity-0"
+                  className={`${getBufferHeight(getItemsBySection(diagram.items, 'status').length)} opacity-0 relative`}
                   onDragOver={(e) => handleItemDragOver(e, 'status', getItemsBySection(diagram.items, 'status').length)}
                   onDragLeave={handleItemDragLeave}
                   onDrop={(e) => handleItemDrop(e, 'status', getItemsBySection(diagram.items, 'status').length)}
-                />
+                >
+                  {dropIndicator?.section === 'status' && dropIndicator?.index === getItemsBySection(diagram.items, 'status').length && (
+                    <div className="absolute top-0 left-0 right-0 h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse z-10" />
+                  )}
+                </div>
               </div>
             </div>
 
@@ -730,9 +1308,9 @@ export const GapsCanvas = () => {
                   const showDropIndicator = dropIndicator?.section === 'goal' && dropIndicator?.index === index
                   
                   return (
-                    <div key={item.id}>
+                    <div key={item.id} className="relative">
                       {showDropIndicator && (
-                        <div className="h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse mb-1" />
+                        <div className="absolute -top-1 left-0 right-0 h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse z-10" />
                       )}
                       
                       <GapsItemComponent
@@ -753,16 +1331,16 @@ export const GapsCanvas = () => {
                   )
                 })}
                 
-                {dropIndicator?.section === 'goal' && dropIndicator?.index === getItemsBySection(diagram.items, 'goal').length && (
-                  <div className="h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse" />
-                )}
-                
                 <div
-                  className="h-16 opacity-0"
+                  className={`${getBufferHeight(getItemsBySection(diagram.items, 'goal').length)} opacity-0 relative`}
                   onDragOver={(e) => handleItemDragOver(e, 'goal', getItemsBySection(diagram.items, 'goal').length)}
                   onDragLeave={handleItemDragLeave}
                   onDrop={(e) => handleItemDrop(e, 'goal', getItemsBySection(diagram.items, 'goal').length)}
-                />
+                >
+                  {dropIndicator?.section === 'goal' && dropIndicator?.index === getItemsBySection(diagram.items, 'goal').length && (
+                    <div className="absolute top-0 left-0 right-0 h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse z-10" />
+                  )}
+                </div>
               </div>
             </div>
 
@@ -787,9 +1365,9 @@ export const GapsCanvas = () => {
                   const showDropIndicator = dropIndicator?.section === 'analysis' && dropIndicator?.index === index
                   
                   return (
-                    <div key={item.id}>
+                    <div key={item.id} className="relative">
                       {showDropIndicator && (
-                        <div className="h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse mb-1" />
+                        <div className="absolute -top-1 left-0 right-0 h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse z-10" />
                       )}
                       
                       <GapsItemComponent
@@ -810,16 +1388,16 @@ export const GapsCanvas = () => {
                   )
                 })}
                 
-                {dropIndicator?.section === 'analysis' && dropIndicator?.index === getItemsBySection(diagram.items, 'analysis').length && (
-                  <div className="h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse" />
-                )}
-                
                 <div
-                  className="h-4 opacity-0"
+                  className={`${getBufferHeight(getItemsBySection(diagram.items, 'analysis').length)} opacity-0 relative`}
                   onDragOver={(e) => handleItemDragOver(e, 'analysis', getItemsBySection(diagram.items, 'analysis').length)}
                   onDragLeave={handleItemDragLeave}
                   onDrop={(e) => handleItemDrop(e, 'analysis', getItemsBySection(diagram.items, 'analysis').length)}
-                />
+                >
+                  {dropIndicator?.section === 'analysis' && dropIndicator?.index === getItemsBySection(diagram.items, 'analysis').length && (
+                    <div className="absolute top-0 left-0 right-0 h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse z-10" />
+                  )}
+                </div>
               </div>
             </div>
 
@@ -844,9 +1422,9 @@ export const GapsCanvas = () => {
                   const showDropIndicator = dropIndicator?.section === 'plan' && dropIndicator?.index === index
                   
                   return (
-                    <div key={item.id}>
+                    <div key={item.id} className="relative">
                       {showDropIndicator && (
-                        <div className="h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse mb-1" />
+                        <div className="absolute -top-1 left-0 right-0 h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse z-10" />
                       )}
                       
                       <GapsItemComponent
@@ -867,17 +1445,137 @@ export const GapsCanvas = () => {
                   )
                 })}
                 
-                {dropIndicator?.section === 'plan' && dropIndicator?.index === getItemsBySection(diagram.items, 'plan').length && (
-                  <div className="h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse" />
-                )}
-                
                 <div
-                  className="h-4 opacity-0"
+                  className={`${getBufferHeight(getItemsBySection(diagram.items, 'plan').length)} opacity-0 relative`}
                   onDragOver={(e) => handleItemDragOver(e, 'plan', getItemsBySection(diagram.items, 'plan').length)}
                   onDragLeave={handleItemDragLeave}
                   onDrop={(e) => handleItemDrop(e, 'plan', getItemsBySection(diagram.items, 'plan').length)}
-                />
+                >
+                  {dropIndicator?.section === 'plan' && dropIndicator?.index === getItemsBySection(diagram.items, 'plan').length && (
+                    <div className="absolute top-0 left-0 right-0 h-1 rounded-full bg-blue-500 shadow-md shadow-blue-300 animate-pulse z-10" />
+                  )}
+                </div>
               </div>
+            </div>
+          </div>
+        </div>
+        </div>
+        
+        {/* Debugging Panel */}
+        <div className="w-96 bg-white rounded-lg shadow-lg p-4">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">🔧 Debugging</h2>
+          
+          {/* Breadcrumbs Section */}
+          <div className="mb-6">
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Diagram Info</h3>
+            <div className="space-y-1 text-sm text-gray-600 font-mono">
+              <div><span className="font-sans text-gray-500">Board ID:</span> {diagram.id || 'Loading...'}</div>
+              <div><span className="font-sans text-gray-500">Title:</span> {diagram.title || 'Untitled'}</div>
+              <div><span className="font-sans text-gray-500">User:</span> Default User</div>
+              <div><span className="font-sans text-gray-500">Total Items:</span> {diagram.items.length}</div>
+              <div className="pt-1">
+                <div><span className="font-sans text-gray-500">Sections:</span></div>
+                <div className="ml-2 space-y-1">
+                  <div>• Status: {getItemsBySection(diagram.items, 'status').length}</div>
+                  <div>• Goal: {getItemsBySection(diagram.items, 'goal').length}</div>
+                  <div>• Analysis: {getItemsBySection(diagram.items, 'analysis').length}</div>
+                  <div>• Plan: {getItemsBySection(diagram.items, 'plan').length}</div>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-gray-200">
+                <div><span className="font-sans text-gray-500">Database Status:</span> <span className="text-green-600">Connected</span></div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Database Operations */}
+          <div className="mb-4">
+            <h4 className="text-sm font-medium text-gray-700 mb-2">Database</h4>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={testLoad}
+                className="px-2 py-2 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors text-left border border-blue-200"
+                title="Load current diagram from database"
+              >
+                📥 Load
+              </button>
+              <button
+                onClick={testSave}
+                className="px-2 py-2 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors text-left border border-green-200"
+                title="Save entire diagram to database (bulk update)"
+              >
+                💾 Save
+              </button>
+              <button
+                onClick={sendTestDataToAPI}
+                className="px-2 py-2 text-sm bg-purple-100 text-purple-700 rounded hover:bg-purple-200 transition-colors text-left border border-purple-200 col-span-2"
+                title="Send test data to API"
+              >
+                🧪 Test Data
+              </button>
+            </div>
+          </div>
+
+          {/* API Simulations */}
+          <div className="mb-4">
+            <h4 className="text-sm font-medium text-gray-700 mb-2">API Simulations</h4>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={simulateAddThought}
+                className="px-2 py-2 text-sm bg-orange-100 text-orange-700 rounded hover:bg-orange-200 transition-colors text-left border border-orange-200"
+                title="Simulate external API call to add a thought"
+              >
+                ➕ Add
+              </button>
+              <button
+                onClick={simulateEditThought}
+                className="px-2 py-2 text-sm bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200 transition-colors text-left border border-yellow-200"
+                title="Simulate external API call to edit a thought"
+              >
+                ✏️ Edit
+              </button>
+              <button
+                onClick={simulateDeleteThought}
+                className="px-2 py-2 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors text-left border border-red-200"
+                title="Simulate external API call to delete a thought"
+              >
+                🗑️ Delete
+              </button>
+              <button
+                onClick={simulateMoveThought}
+                className="px-2 py-2 text-sm bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 transition-colors text-left border border-indigo-200"
+                title="Simulate external API call to move a thought between sections"
+              >
+                🔄 Move
+              </button>
+              <button
+                onClick={simulateAIChanges}
+                className="px-2 py-2 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors text-left border border-gray-200 col-span-2"
+                title="Simulate AI making multiple changes via API"
+              >
+                🤖 AI Sim
+              </button>
+            </div>
+          </div>
+
+          {/* Advanced AI Simulations */}
+          <div className="mb-4">
+            <h4 className="text-sm font-medium text-gray-700 mb-2">Advanced AI Tests</h4>
+            <div className="space-y-2">
+              <button
+                onClick={simulateAIBulkUpdate}
+                className="w-full px-3 py-2 text-sm bg-purple-100 text-purple-700 rounded hover:bg-purple-200 transition-colors text-left border border-purple-200"
+                title="Simulate AI updating entire diagram at once"
+              >
+                🧠 AI Bulk Update
+              </button>
+              <button
+                onClick={simulateAIRapidFire}
+                className="w-full px-3 py-2 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors text-left border border-red-200"
+                title="Simulate AI making rapid simultaneous API calls"
+              >
+                ⚡ AI Rapid Fire
+              </button>
             </div>
           </div>
         </div>

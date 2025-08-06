@@ -23,6 +23,8 @@ dist/
 .env.development.local
 .env.test.local
 .env.production.local
+# Keep example file for reference
+!.env.example
 
 # TypeScript
 *.tsbuildinfo
@@ -58,3 +60,13 @@ logs/
 .swc/ 
 /generated/prisma
 mels-gaps/
+
+# Project-specific exclusions
+docs/
+MelsGAPS-workspace.code-workspace
+data/
+prisma/database.db
+
+# Temporary files
+*.tmp
+*.temp

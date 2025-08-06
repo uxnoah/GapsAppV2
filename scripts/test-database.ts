@@ -13,7 +13,7 @@ import {
   createBoard,
   getBoardById,
   createThought,
-  logActivity,
+  logActivityToBoard,
   healthCheck,
   disconnectDatabase,
 } from '../src/lib/database'
@@ -58,41 +58,40 @@ async function testDatabase() {
     const thoughts = await Promise.all([
       createThought({
         content: 'Current system is slow',
-        quadrant: 'status',
+        section: 'status',
         boardId: board.id,
-        position: 1,
+        order: 0,
       }),
       createThought({
         content: 'Improve system performance by 50%',
-        quadrant: 'goal',
+        section: 'goal',
         boardId: board.id,
-        position: 1,
+        order: 0,
       }),
       createThought({
         content: 'Database queries are inefficient',
-        quadrant: 'analysis',
+        section: 'analysis',
         boardId: board.id,
-        position: 1,
+        order: 0,
       }),
       createThought({
         content: 'Optimize database indexes',
-        quadrant: 'plan',
+        section: 'plan',
         boardId: board.id,
-        position: 1,
+        order: 0,
       }),
     ])
     console.log('✅ Thoughts created:', thoughts.length)
 
     // Test 6: Log Activity
     console.log('\n6. Testing activity logging...')
-    await logActivity({
+    await logActivityToBoard({
       action: 'test_run',
       detail: 'Database test script execution',
       boardId: board.id,
       userId: user.id,
       entityType: 'board',
       entityId: board.id,
-      sessionId: 'test-session-' + Date.now(),
     })
     console.log('✅ Activity logged')
 
@@ -103,16 +102,16 @@ async function testDatabase() {
     console.log(`   - Title: ${fullBoard?.title}`)
     console.log(`   - Thoughts: ${fullBoard?.thoughts.length}`)
     console.log(`   - User: ${fullBoard?.user.username}`)
-    console.log(`   - Meeting Minutes: ${fullBoard?._count.meetingMinutes}`)
+    console.log(`   - Work Sessions: ${fullBoard?._count.workSessions}`)
 
-    // Test 8: Verify Quadrant Distribution
-    console.log('\n8. Verifying thought distribution by quadrant...')
-    const quadrantCounts = fullBoard?.thoughts.reduce((acc, thought) => {
-      acc[thought.quadrant] = (acc[thought.quadrant] || 0) + 1
+    // Test 8: Verify Section Distribution
+    console.log('\n8. Verifying thought distribution by section...')
+    const sectionCounts = fullBoard?.thoughts.reduce((acc, thought) => {
+      acc[thought.section] = (acc[thought.section] || 0) + 1
       return acc
     }, {} as Record<string, number>) || {}
     
-    console.log('✅ Quadrant distribution:', quadrantCounts)
+    console.log('✅ Section distribution:', sectionCounts)
 
     console.log('\n🎉 All database tests passed successfully!')
     console.log('\n📊 Test Summary:')
@@ -124,7 +123,7 @@ async function testDatabase() {
 
   } catch (error) {
     console.error('❌ Database test failed:', error)
-    console.error('Stack trace:', error.stack)
+    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace available')
     process.exit(1)
   } finally {
     // Cleanup: Disconnect from database

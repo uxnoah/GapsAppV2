@@ -128,10 +128,10 @@ export default function DatabaseTestPage() {
         body: JSON.stringify({
           boardId: boardData.board.id,
           thoughts: [
-            { content: 'System is running slowly', quadrant: 'status' },
-            { content: 'Achieve 2x performance improvement', quadrant: 'goal' },
-            { content: 'Database queries are inefficient', quadrant: 'analysis' },
-            { content: 'Implement query optimization', quadrant: 'plan' }
+                { content: 'System is running slowly', section: 'status' },
+    { content: 'Achieve 2x performance improvement', section: 'goal' },
+    { content: 'Database queries are inefficient', section: 'analysis' },
+    { content: 'Implement query optimization', section: 'plan' }
           ]
         })
       })
@@ -173,7 +173,7 @@ export default function DatabaseTestPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           thoughtId: thoughtsData.thoughts[1].id,
-          quadrant: 'status',  // Move goal → status
+          section: 'status',  // Move goal → status
           position: 1
         })
       })
@@ -397,12 +397,12 @@ export default function DatabaseTestPage() {
               <div>
                 <h3 className="font-semibold text-gray-700">GAPS Thoughts:</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                  {['status', 'goal', 'analysis', 'plan'].map(quadrant => {
-                    const thoughts = currentData.thoughts.filter((t: any) => t.quadrant === quadrant)
+                  {['status', 'goal', 'analysis', 'plan'].map(section => {
+                    const thoughts = currentData.thoughts.filter((t: any) => t.section === section)
                     return (
-                      <div key={quadrant} className="bg-gray-50 p-3 rounded">
+                      <div key={section} className="bg-gray-50 p-3 rounded">
                         <h4 className="font-medium text-gray-800 capitalize mb-2">
-                          {quadrant} ({thoughts.length})
+                          {section} ({thoughts.length})
                         </h4>
                         <ul className="text-sm text-gray-600 space-y-1">
                           {thoughts.map((thought: any) => (

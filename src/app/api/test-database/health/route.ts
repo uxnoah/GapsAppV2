@@ -7,7 +7,7 @@ export async function GET() {
     return NextResponse.json(health)
   } catch (error) {
     return NextResponse.json(
-      { status: 'error', error: error.message },
+      { status: 'error', error: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     )
   }

@@ -18,12 +18,13 @@ async function getOrCreateDefaultUser() {
     
     if (!user) {
       const hashedPassword = await bcrypt.hash('demo-password', 10)
-      user = await createUser({
+      const newUser = await createUser({
         username: 'demo-user',
         email: DEFAULT_USER_EMAIL,
         passwordHash: hashedPassword,
         isAdmin: false
       })
+      user = await getUserByEmail(DEFAULT_USER_EMAIL)
     }
     
     return user
@@ -56,6 +57,9 @@ export async function GET() {
   try {
     // Use the exact same logic as the main diagram API
     const user = await getOrCreateDefaultUser()
+    if (!user) {
+      throw new Error('Failed to get or create user')
+    }
     const board = await getOrCreateDefaultBoard(user.id)
 
     return NextResponse.json({

@@ -5,6 +5,18 @@
  * It includes connection management, helper functions, and type-safe operations.
  */
 
+// =============================================================================
+// MY COMMENTS & QUESTIONS
+// =============================================================================
+
+// Add your comments here using the prefixes:
+// 🧠 MY THOUGHTS: [Your understanding or interpretation]
+// ❓ QUESTION: [Your questions about the code]
+// 💡 IDEA: [Your suggestions or improvements]
+// 🔧 TODO: [Things you want to change or add]
+// 🐛 BUG: [Issues you've found]
+// 📝 NOTE: [Important things to remember]
+
 import { PrismaClient } from '../../generated/prisma'
 
 // Global variable to hold the Prisma client instance
@@ -25,6 +37,9 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 export { prisma }
+
+// ❓ QUESTION: [Is this something that will need to change for porduction or when it's hosted? I would like to understand what is happeninged here better. We are loading an instance of prisma, which the software that sotres out database? Or just gives us access? Or both?[]
+
 
 /**
  * Database Helper Functions
@@ -92,6 +107,8 @@ export async function deleteUser(id: number) {
   })
 }
 
+
+// 🔧 TODO: [Function below should we have a way to data to the board. It's certainly want to be able to have a title. User ID would be presumably randomly created. Description, yeah, I either provide that or maybe not. It might be kids were like I don't know. Duplicate a border right so then you'd want to copy all of it. Or maybe your importing the board so I think we want to have that. Some part of this function where you can actually include the thoughts and I just can't tell if that's being done]
 // Board Management
 export async function createBoard(data: {
   title: string
@@ -121,12 +138,14 @@ export async function getBoardById(id: number, userId?: number) {
     where.userId = userId
   }
   
+
+  // QUESITON: [What's happened below here?]
   return await prisma.board.findUnique({
     where,
     include: {
       thoughts: {
         orderBy: [
-          { quadrant: 'asc' },
+          { section: 'asc' },
           { position: 'asc' },
           { createdAt: 'asc' },
         ],
@@ -152,6 +171,9 @@ export async function getUserBoards(userId: number) {
     orderBy: { updatedAt: 'desc' },
   })
 }
+
+// 📝 NOTE: [This function updates board metadata (title, description, etc.) but not thoughts. Thoughts are updated separately using thought-specific functions.]
+
 
 export async function updateBoard(id: number, data: {
   title?: string
@@ -184,28 +206,55 @@ export async function deleteBoard(id: number, userId: number) {
 // Thought Management
 export async function createThought(data: {
   content: string
-  quadrant: string
+  section: string
   boardId: number
-  position?: number
+  order?: number  // maps to position in DB
+  tags?: string[]
+  priority?: string
+  status?: string
   aiGenerated?: boolean
+  confidence?: number
+  metadata?: any
 }) {
+  // Get the next position if not provided
+  let position = data.order
+  if (position === undefined) {
+    // Count existing thoughts in this section to get the next position
+    const thoughtCount = await prisma.thought.count({
+      where: { 
+        boardId: data.boardId, 
+        section: data.section
+      }
+    })
+    position = thoughtCount // 0-based positioning: 0, 1, 2, etc.
+  }
+
   return await prisma.thought.create({
     data: {
       content: data.content,
-      quadrant: data.quadrant,
+      section: data.section,
       boardId: data.boardId,
-      position: data.position,
+      position: position,      // order -> position
+      tags: data.tags,
+      priority: data.priority,
+      status: data.status,
       aiGenerated: data.aiGenerated || false,
+      confidence: data.confidence,
+      metadata: data.metadata,
     },
   })
 }
 
 export async function updateThought(id: number, data: {
   content?: string
-  quadrant?: string
+  section?: string
   position?: number
+  tags?: string[]
   priority?: string
   status?: string
+  aiGenerated?: boolean
+  confidence?: number
+  metadata?: any
 }) {
   return await prisma.thought.update({
     where: { id },
@@ -214,27 +263,114 @@ export async function updateThought(id: number, data: {
 }
 
 export async function deleteThought(id: number) {
-  return await prisma.thought.delete({
-    where: { id },
+  return await prisma.$transaction(async (tx) => {
+    // Get the thought to be deleted
+    const thoughtToDelete = await tx.thought.findUnique({
+      where: { id },
+      select: { section: true, position: true, boardId: true }
+    })
+    
+    if (!thoughtToDelete) {
+      throw new Error(`Thought with id ${id} not found`)
+    }
+    
+    // Delete the thought
+    const deletedThought = await tx.thought.delete({
+      where: { id },
+    })
+    
+    // Shift remaining thoughts in the same section up to fill the gap
+    if (thoughtToDelete.position !== null) {
+      await tx.thought.updateMany({
+        where: {
+          boardId: thoughtToDelete.boardId,
+          section: thoughtToDelete.section,
+          position: { gt: thoughtToDelete.position }
+        },
+        data: { position: { decrement: 1 } }
+      })
+    }
+    
+    return deletedThought
   })
 }
 
-export async function moveThought(id: number, data: {
-  quadrant: string
-  position?: number
-  boardId?: number // Optional: move to different board
-}) {
-  return await prisma.thought.update({
-    where: { id },
-    data: {
-      quadrant: data.quadrant,
-      position: data.position,
-      boardId: data.boardId,
-    },
+export async function moveThought(id: number, targetSection: string, targetIndex: number) {
+  return await prisma.$transaction(async (tx) => {
+    // Get the current thought
+    const currentThought = await tx.thought.findUnique({
+      where: { id },
+      select: { section: true, position: true, boardId: true }
+    })
+    
+    if (!currentThought) {
+      throw new Error(`Thought with id ${id} not found`)
+    }
+    
+    const { section: sourceSection, position: sourceIndex, boardId } = currentThought
+    
+    // If moving within the same section
+    if (sourceSection === targetSection && sourceIndex !== null) {
+      // Reorder within same section
+      if (sourceIndex < targetIndex) {
+        // Moving down: shift items up
+        await tx.thought.updateMany({
+          where: {
+            boardId,
+            section: targetSection,
+            position: { gt: sourceIndex, lte: targetIndex }
+          },
+          data: { position: { decrement: 1 } }
+        })
+      } else if (sourceIndex > targetIndex) {
+        // Moving up: shift items down
+        await tx.thought.updateMany({
+          where: {
+            boardId,
+            section: targetSection,
+            position: { gte: targetIndex, lt: sourceIndex }
+          },
+          data: { position: { increment: 1 } }
+        })
+      }
+    } else {
+      // Moving between sections
+      
+      // Shift items in source section up to fill the gap
+      if (sourceIndex !== null) {
+        await tx.thought.updateMany({
+          where: {
+            boardId,
+            section: sourceSection,
+            position: { gt: sourceIndex }
+          },
+          data: { position: { decrement: 1 } }
+        })
+      }
+      
+      // Shift items in target section down to make space
+      await tx.thought.updateMany({
+        where: {
+          boardId,
+          section: targetSection,
+          position: { gte: targetIndex }
+        },
+        data: { position: { increment: 1 } }
+      })
+    }
+    
+    // Update the moved thought
+    return await tx.thought.update({
+      where: { id },
+      data: {
+        section: targetSection,
+        position: targetIndex,
+      },
+    })
   })
 }
 
-export async function reorderThoughts(boardId: number, quadrant: string, thoughtOrders: { id: number, position: number }[]) {
+export async function reorderThoughts(boardId: number, section: string, thoughtOrders: { id: number, position: number }[]) {
   // Update multiple thoughts' positions in a single transaction
   return await prisma.$transaction(
     thoughtOrders.map(({ id, position }) =>
@@ -245,6 +381,8 @@ export async function reorderThoughts(boardId: number, quadrant: string, thought
     )
   )
 }
+// QUESTION [ Lots of qquestions about the stuff aboove and below. How are these different than the API calls? Or are these just the results of hte API calls that call these functions to actually make database changes? Looking below. Why is edit here and update above? How are they different? ]
+
 
 export async function editThought(id: number, data: {
   content?: string
@@ -330,11 +468,183 @@ export async function healthCheck() {
     await prisma.$queryRaw`SELECT 1`
     return { status: 'healthy', database: 'connected' }
   } catch (error) {
-    return { status: 'error', error: error.message }
+    return { status: 'error', error: error instanceof Error ? error.message : 'Unknown error' }
   }
 }
 
 // Graceful Shutdown
 export async function disconnectDatabase() {
   await prisma.$disconnect()
+}
+
+
+// NOTE [section below will need to be updated when we add authentication.]
+
+// DEFAULT USER HELPERS (before authentication is implemented)
+const DEFAULT_USER_EMAIL = 'demo@chapp.local'
+const DEFAULT_BOARD_TITLE = 'My GAPS Diagram'
+
+export async function getOrCreateDefaultUser() {
+  try {
+    // Try to find existing default user
+    let user = await getUserByEmail(DEFAULT_USER_EMAIL)
+    
+    if (!user) {
+      console.log('🏗️ Creating default user for demo')
+      // Create default user
+      const bcrypt = await import('bcryptjs')
+      const hashedPassword = await bcrypt.hash('demo-password', 10)
+      const newUser = await createUser({
+        username: 'demo-user',
+        email: DEFAULT_USER_EMAIL,
+        passwordHash: hashedPassword,
+        isAdmin: false
+      })
+      user = await getUserByEmail(DEFAULT_USER_EMAIL)
+    }
+    
+    return user
+  } catch (error) {
+    console.error('Error with default user:', error)
+    throw error
+  }
+}
+
+// 📝 NOTE: [This function creates a default board for new users so they don't start with an empty app. Used for better UX.]
+
+export async function getOrCreateDefaultBoard(userId: number) {
+  try {
+    // Get user's boards
+    const boards = await getUserBoards(userId)
+    
+    if (boards.length === 0) {
+      console.log('🏗️ Creating default board for user')
+      // Create default board
+      return await createBoard({
+        title: DEFAULT_BOARD_TITLE,
+        userId: userId,
+        description: 'Default GAPS diagram board'
+      })
+    }
+    
+    // Return the first board (most recently updated)
+    return await getBoardById(boards[0].id)
+  } catch (error) {
+    console.error('Error with default board:', error)
+    throw error
+  }
 } 
+
+// =============================================================================
+// CONVERSATION MANAGEMENT FUNCTIONS
+// =============================================================================
+
+/**
+ * Create a new conversation within a board
+ */
+export async function createConversation(data: {
+  boardId: number
+  title?: string
+  model?: string
+  systemPrompt?: string
+}) {
+  return await prisma.conversation.create({
+    data: {
+      boardId: data.boardId,
+      title: data.title,
+      model: data.model,
+      systemPrompt: data.systemPrompt,
+      messageCount: 0,
+    },
+    include: {
+      messages: true,
+    },
+  })
+}
+
+/**
+ * Get a conversation with all its messages
+ */
+export async function getConversationWithMessages(conversationId: number) {
+  return await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    include: {
+      messages: {
+        orderBy: { sequenceNumber: 'asc' },
+      },
+    },
+  })
+}
+
+/**
+ * Add a message to a conversation
+ */
+export async function addMessage(data: {
+  conversationId: number
+  role: string // human, ai, system, function
+  content: string
+  model?: string
+  tokens?: number
+  metadata?: any
+}) {
+  // Get current message count for sequence number
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: data.conversationId },
+    select: { messageCount: true },
+  })
+  
+  if (!conversation) {
+    throw new Error(`Conversation ${data.conversationId} not found`)
+  }
+  
+  return await prisma.$transaction(async (tx) => {
+    // Create the message
+    const message = await tx.message.create({
+      data: {
+        conversationId: data.conversationId,
+        role: data.role,
+        content: data.content,
+        sequenceNumber: conversation.messageCount,
+        model: data.model,
+        tokens: data.tokens,
+        metadata: data.metadata,
+      },
+    })
+    
+    // Update conversation message count
+    await tx.conversation.update({
+      where: { id: data.conversationId },
+      data: { 
+        messageCount: { increment: 1 },
+        updatedAt: new Date(),
+      },
+    })
+    
+    return message
+  })
+}
+
+/**
+ * Update conversation summary
+ */
+export async function updateConversationSummary(conversationId: number, summary: string) {
+  return await prisma.conversation.update({
+    where: { id: conversationId },
+    data: { summary },
+  })
+}
+
+/**
+ * Get all conversations for a board
+ */
+export async function getBoardConversations(boardId: number) {
+  return await prisma.conversation.findMany({
+    where: { boardId },
+    include: {
+      messages: {
+        orderBy: { sequenceNumber: 'asc' },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  })
+}

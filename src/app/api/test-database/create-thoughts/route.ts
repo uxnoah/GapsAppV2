@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
       thoughts.map((thought: any) => 
         createThought({
           content: thought.content,
-          quadrant: thought.quadrant,
+          section: thought.section,   // Database and frontend both use 'section'
           boardId,
         })
       )
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     )
   }

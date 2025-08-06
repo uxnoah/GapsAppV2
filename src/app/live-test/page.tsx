@@ -23,7 +23,7 @@ interface DatabaseBoard {
   thoughts: Array<{
     id: number
     content: string
-    quadrant: string
+    section: string
     position: number
     aiGenerated: boolean
     createdAt: string
@@ -124,7 +124,7 @@ export default function LiveTestPage() {
           boardId: currentBoard?.id || 1,
           thoughts: [{
             content: `Test thought ${Date.now()}`,
-            quadrant: 'status'
+            section: 'status'
           }]
         })
       })
@@ -136,7 +136,7 @@ export default function LiveTestPage() {
         addLog('❌ Failed to add test thought')
       }
     } catch (error) {
-      addLog(`❌ Error: ${error.message}`)
+      addLog(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
@@ -149,13 +149,23 @@ export default function LiveTestPage() {
       const response = await fetch('/api/diagram')
       const currentData = await response.json()
       
-      addLog(`📊 Retrieved ${currentData.status?.length + currentData.goal?.length + currentData.analysis?.length + currentData.plan?.length || 0} thoughts`)
+      // Convert from GET format { title, thoughts } to PUT format { title, status, goal, analysis, plan }
+      const putData = {
+        title: currentData.title,
+        status: currentData.thoughts?.filter((t: any) => t.section === 'status').map((t: any) => t.text) || [],
+        goal: currentData.thoughts?.filter((t: any) => t.section === 'goal').map((t: any) => t.text) || [],
+        analysis: currentData.thoughts?.filter((t: any) => t.section === 'analysis').map((t: any) => t.text) || [],
+        plan: currentData.thoughts?.filter((t: any) => t.section === 'plan').map((t: any) => t.text) || []
+      }
+      
+      const totalThoughts = putData.status.length + putData.goal.length + putData.analysis.length + putData.plan.length
+      addLog(`📊 Retrieved ${totalThoughts} thoughts`)
       
       // Save it back (this tests the PUT endpoint)
       const putResponse = await fetch('/api/diagram', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentData)
+        body: JSON.stringify(putData)
       })
       
       console.log('🚀 Save response status:', putResponse.status)
@@ -169,7 +179,7 @@ export default function LiveTestPage() {
         console.error('❌ Manual save failed:', putResponse.status)
       }
     } catch (error) {
-      addLog(`❌ Error: ${error.message}`)
+      addLog(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
       console.error('❌ Manual save error:', error)
     }
   }
@@ -291,7 +301,7 @@ export default function LiveTestPage() {
                       {currentBoard.thoughts.map(thought => (
                         <div key={thought.id} className="text-xs bg-gray-50 p-2 rounded">
                           <div className="font-medium text-gray-800">
-                            {thought.quadrant}: {thought.content}
+                            {thought.section}: {thought.content}
                           </div>
                           <div className="text-gray-500">
                             pos: {thought.position} | ai: {thought.aiGenerated ? '🤖' : '👤'}

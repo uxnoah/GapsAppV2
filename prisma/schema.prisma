@@ -60,6 +60,7 @@ model Board {
   // Relations
   thoughts    Thought[]
   workSessions WorkSession[]
+  conversations Conversation[]
   
   @@map("boards")
 }
@@ -68,14 +69,14 @@ model Board {
 model Thought {
   id        Int      @id @default(autoincrement())
   content   String
-  quadrant  String   // status, goal, analysis, plan
+  section   String   // status, goal, analysis, plan
   
   // Board ownership
   boardId   Int      @map("board_id")
   board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
   
   // Positioning and organization
-  position  Int?     // Order within quadrant
+  position  Int?     // Order within section
   tags      Json?    // Flexible tagging system
   priority  String?  // low, medium, high
   status    String?  // e.g., "pending", "in_progress", "completed"
@@ -116,7 +117,6 @@ model WorkSession {
   endedAt     DateTime? @map("ended_at")
   
   // Relations - things that happen within this session
-  conversationTurns ConversationTurn[]
   activityLogs      ActivityLog[]
   
   @@map("work_sessions")
@@ -146,22 +146,50 @@ model ActivityLog {
   @@map("activity_logs")
 }
 
-// ConversationTurn Model - AI chat history within a session
-model ConversationTurn {
-  id      Int    @id @default(autoincrement())
-  role    String // user, assistant, system
-  content String
+// Conversation Model - AI chat conversations within a board
+model Conversation {
+  id          Int       @id @default(autoincrement())
+  title       String?   // Optional conversation title
   
-  // Session context (REQUIRED - conversations always happen in a session)
-  sessionId Int         @map("session_id")
-  session   WorkSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  // Board context (REQUIRED - conversations always belong to a board)
+  boardId     Int       @map("board_id")
+  board       Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
   
-  // AI metadata
-  model     String? // which AI model was used
-  tokens    Int?    // token count if available
-  metadata  Json?   // Additional AI context
+  // Conversation metadata
+  model       String?   // which AI model is being used
+  systemPrompt String?  @map("system_prompt") // System prompt for this conversation
+  messageCount Int      @default(0) @map("message_count") // Number of messages
+  summary     String?   // Optional conversation summary
+  metadata    Json?     // Additional conversation context
   
-  timestamp DateTime @default(now())
+  // Timestamps
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
   
-  @@map("conversation_turns")
+  // Relations
+  messages    Message[]
+  
+  @@map("conversations")
+}
+
+// Message Model - Individual messages within a conversation
+model Message {
+  id             Int          @id @default(autoincrement())
+  role           String       // human, ai, system, function
+  content        String
+  
+  // Conversation context (REQUIRED - messages always belong to a conversation)
+  conversationId Int          @map("conversation_id")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  // Message metadata
+  sequenceNumber Int          @map("sequence_number") // Order within conversation
+  model          String?      // which AI model was used for this message
+  tokens         Int?         // token count if available
+  metadata       Json?        // Additional message context
+  
+  // Timestamps
+  createdAt      DateTime     @default(now()) @map("created_at")
+  
+  @@map("messages")
 }
