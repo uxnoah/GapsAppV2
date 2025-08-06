@@ -2,7 +2,7 @@
 
 A modern web application for creating and managing GAPS (Goals, Analysis, Plans, Status) diagrams. Built with Next.js, TypeScript, Prisma, and TailwindCSS.
 
-## 🚀 Features
+## 🚀 Planned Features
 
 - **Interactive GAPS Diagrams**: Create and manage goal-oriented diagrams
 - **Real-time Collaboration**: Work with others on shared boards

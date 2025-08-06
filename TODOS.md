@@ -2,6 +2,28 @@
 
 ## User TODOs
 
+## 🚨 CRITICAL: TypeScript & Code Quality Issues
+
+### Database Function Inconsistencies
+- [ ] **FIX ROOT CAUSE**: `createUser` vs `getUserByEmail` return type mismatch
+  - `createUser` returns: `{ id, username, email, passwordHash, isAdmin, ... }`
+  - `getUserByEmail` returns: `{ id, username, email, passwordHash, isAdmin, boards: [...], ... }`
+  - **Solution**: Make `getUserByEmail` NOT include boards by default, or make `createUser` include them
+  - **Impact**: This caused cascading TypeScript errors across multiple API routes
+
+### TypeScript Infrastructure Problems
+- [ ] **Define proper interfaces** for all data structures instead of using `any`
+- [ ] **Fix database functions** to have consistent return types across all operations
+- [ ] **Implement proper error handling** at the source instead of catching everywhere
+- [ ] **Use robust state management** patterns instead of null checks everywhere
+- [ ] **Create proper TypeScript interfaces** for API request/response formats
+
+### Code Quality Debt
+- [ ] **Audit all `any` type usage** and replace with proper interfaces
+- [ ] **Standardize error handling** patterns across all API routes
+- [ ] **Review null safety patterns** and implement consistent approaches
+- [ ] **Document expected data structures** for all database operations
+
 ### Database & Data Structure
 1. [ ] Add way to add data to board (title, user ID, description) - [src/lib/database.ts:110](src/lib/database.ts#L110)
 2. [ ] Comment out logging functions until activity tracking is implemented - [src/lib/database.ts:401](src/lib/database.ts#L401)
