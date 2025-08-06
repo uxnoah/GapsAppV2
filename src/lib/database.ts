@@ -38,7 +38,7 @@ if (process.env.NODE_ENV === 'development') {
 
 export { prisma }
 
-// ❓ QUESTION: [Is this something that will need to change for porduction or when it's hosted? I would like to understand what is happeninged here better. We are loading an instance of prisma, which the software that sotres out database? Or just gives us access? Or both?[]
+
 
 
 /**
