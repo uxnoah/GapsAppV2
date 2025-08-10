@@ -40,6 +40,7 @@ export default function DatabaseTestPage() {
       { test: 'Edit Thought Content', status: 'pending' },
       { test: 'Move Thought Between Quadrants', status: 'pending' },
       { test: 'Update Board Title', status: 'pending' },
+      { test: 'Update Diagram Title via API', status: 'pending' },
       { test: 'Log Activities', status: 'pending' },
       { test: 'Retrieve Full Data', status: 'pending' },
       { test: 'Verify Relationships', status: 'pending' },
@@ -206,7 +207,26 @@ export default function DatabaseTestPage() {
         duration: Date.now() - boardUpdateStart
       })
 
-      // Test 8: Log Activities
+      // Test 8: Update Diagram Title via API
+      updateTest('Update Diagram Title via API', { status: 'running' })
+      const titleApiStart = Date.now()
+      
+      const titleApiResponse = await fetch('/api/diagram/title', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'AI Updated Title 🚀'
+        })
+      })
+      const titleApiData = await titleApiResponse.json()
+      
+      updateTest('Update Diagram Title via API', {
+        status: titleApiData.success ? 'success' : 'error',
+        result: titleApiData.diagram?.title || 'Title update failed',
+        duration: Date.now() - titleApiStart
+      })
+
+      // Test 9: Log Activities
       updateTest('Log Activities', { status: 'running' })
       const activityStart = Date.now()
       
@@ -228,7 +248,7 @@ export default function DatabaseTestPage() {
         duration: Date.now() - activityStart
       })
 
-      // Test 9: Retrieve Full Data
+      // Test 10: Retrieve Full Data
       updateTest('Retrieve Full Data', { status: 'running' })
       const retrieveStart = Date.now()
       
@@ -243,7 +263,7 @@ export default function DatabaseTestPage() {
 
       setCurrentData(fullData.board)
 
-      // Test 10: Verify Relationships
+      // Test 11: Verify Relationships
       updateTest('Verify Relationships', { status: 'running' })
       const verifyStart = Date.now()
       

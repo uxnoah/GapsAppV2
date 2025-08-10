@@ -17,6 +17,12 @@
 // 🐛 BUG: [Issues you've found]
 // 📝 NOTE: [Important things to remember]
 
+// Node.js path utilities, used here to normalize SQLite `file:` URLs
+// Hosted DBs (e.g., postgres://...) won't use this; see note below
+// Node.js path utilities, used here to normalize SQLite `file:` URLs
+// Hosted DBs (e.g., postgres://...) won't use this; see note below
+import path from 'path'
+import type { Prisma } from '../../generated/prisma'
 import { PrismaClient } from '../../generated/prisma'
 
 // Global variable to hold the Prisma client instance
@@ -30,6 +36,31 @@ declare global {
  * In development, we create a new client each time due to hot reloading.
  * In production, we reuse the same client instance for performance.
  */
+/**
+ * Normalize DATABASE_URL
+ * ----------------------
+ * Converts relative SQLite paths (file:./...) to absolute paths so workers
+ * launched from different CWDs (e.g., Next.js workers) can resolve the same
+ * on-disk database file reliably.
+ * 
+ * Hosted DB note:
+ * - For postgres/mysql providers, DATABASE_URL will be like `postgres://...`.
+ * - This block only runs for `file:` URLs and is a no-op for hosted DBs.
+ * - When you switch to a hosted DB, you can keep this safely or remove it.
+ */
+(() => {
+  const url = process.env.DATABASE_URL
+  if (!url) return
+  if (url.startsWith('file:./') || url.startsWith('file:../')) {
+    const relative = url.slice('file:'.length)
+    const absolute = 'file:' + path.resolve(process.cwd(), relative)
+    process.env.DATABASE_URL = absolute
+  }
+})()
+
+// Hosted DB note:
+// - Keep a single PrismaClient to avoid too many connections.
+// - For serverless Postgres, consider Prisma Accelerate/Data Proxy or a pooler.
 const prisma = globalThis.__prisma ?? new PrismaClient()
 
 if (process.env.NODE_ENV === 'development') {
@@ -42,11 +73,46 @@ export { prisma }
 
 
 /**
- * Database Helper Functions
- * ========================
+ * File structure overview
+ * =======================
+ * 1) Prisma client setup (singleton + DATABASE_URL normalization)
+ * 2) User management (create/get/update/delete)
+ * 3) Board management (create/get/update/delete/list)
+ * 4) Thought management (CRUD + move/reorder/edit content)
+ * 5) Session & activity logging (work sessions + audit trail)
+ * 6) Default demo helpers (until authentication is added)
+ * 7) Conversation management (boards ↔ conversations/messages)
+ * 8) Health/shutdown helpers
+ *
+ * Typical usage
+ * -------------
+ * - Diagram API routes call user/board helpers and activity logging
+ * - Thoughts API routes call thought CRUD/move and activity logging
+ * - Test-database routes exercise a mix of the above
  */
 
+// =============================================================================
+// Return type helpers (Option A)
+// =============================================================================
+export type BoardWithRelations = Prisma.BoardGetPayload<{
+  include: {
+    thoughts: true
+    user: { select: { id: true; username: true; email: true } }
+    _count: { select: { thoughts: true; workSessions: true } }
+  }
+}>
+
+export type BoardSummaryWithCounts = Prisma.BoardGetPayload<{
+  select: {
+    id: true
+    title: true
+    updatedAt: true
+    _count: { select: { thoughts: true } }
+  }
+}>
+
 // User Management
+/** Create a new user (used by demo bootstrap and test utilities). */
 export async function createUser(data: {
   username: string
   email: string
@@ -63,13 +129,18 @@ export async function createUser(data: {
   })
 }
 
-export async function getUserByEmail(email: string) {
+/** Find a user by email; optionally include boards (used by demo bootstrap). */
+export async function getUserByEmail(
+  email: string,
+  options?: { includeBoards?: boolean }
+) {
   return await prisma.user.findUnique({
     where: { email },
-    include: { boards: true },
+    include: options?.includeBoards ? { boards: true } : undefined,
   })
 }
 
+/** Find a user by id and include boards (admin/test helpers). */
 export async function getUserById(id: number) {
   return await prisma.user.findUnique({
     where: { id },
@@ -77,12 +148,20 @@ export async function getUserById(id: number) {
   })
 }
 
+/** Update user profile/settings; returns a safe selection for UI display. */
+// Preferences note:
+// - `preferences` exists in Prisma schema as `Json?` (see prisma/schema.prisma).
+// - It's currently typed as `any` here as a placeholder until we define a shape.
+// - This function selects specific fields to return and does NOT include `preferences` in the select.
+//   The update still applies to `preferences` if provided, it just isn't returned.
+// - TODO: define a `UserPreferences` type and either include it in the return when needed
+//         or create a dedicated getter for preferences.
 export async function updateUser(id: number, data: {
   username?: string
   email?: string
   displayName?: string
   avatarUrl?: string
-  preferences?: any
+  preferences?: Prisma.JsonValue
 }) {
   return await prisma.user.update({
     where: { id },
@@ -100,6 +179,7 @@ export async function updateUser(id: number, data: {
   })
 }
 
+/** Delete a user by id (cascades via relational schema). */
 export async function deleteUser(id: number) {
   // This will cascade delete all user's boards, thoughts, etc.
   return await prisma.user.delete({
@@ -110,6 +190,7 @@ export async function deleteUser(id: number) {
 
 // 🔧 TODO: [Function below should we have a way to data to the board. It's certainly want to be able to have a title. User ID would be presumably randomly created. Description, yeah, I either provide that or maybe not. It might be kids were like I don't know. Duplicate a border right so then you'd want to copy all of it. Or maybe your importing the board so I think we want to have that. Some part of this function where you can actually include the thoughts and I just can't tell if that's being done]
 // Board Management
+/** Create a board for a user; include thoughts and basic user info for UI. */
 export async function createBoard(data: {
   title: string
   userId: number
@@ -126,21 +207,19 @@ export async function createBoard(data: {
       user: {
         select: { id: true, username: true, email: true },
       },
+      _count: {
+        select: { thoughts: true, workSessions: true },
+      },
     },
   })
 }
 
-export async function getBoardById(id: number, userId?: number) {
-  const where: any = { id }
-  
-  // If userId is provided, ensure user can only access their own boards
-  if (userId) {
-    where.userId = userId
-  }
-  
+/** Get board by id (optionally enforce user ownership); include ordered thoughts, user, counts. */
+export async function getBoardById(id: number, userId?: number): Promise<BoardWithRelations | null> {
+  // Use a typed where-clause. If userId is provided, enforce ownership.
+  const where: Prisma.BoardWhereInput = userId ? { id, userId } : { id }
 
-  // QUESITON: [What's happened below here?]
-  return await prisma.board.findUnique({
+  return await prisma.board.findFirst({
     where,
     include: {
       thoughts: {
@@ -160,13 +239,15 @@ export async function getBoardById(id: number, userId?: number) {
   })
 }
 
-export async function getUserBoards(userId: number) {
+/** List a user's boards with counts; ordered by last update. */
+export async function getUserBoards(userId: number): Promise<BoardSummaryWithCounts[]> {
   return await prisma.board.findMany({
     where: { userId },
-    include: {
-      _count: {
-        select: { thoughts: true },
-      },
+    select: {
+      id: true,
+      title: true,
+      updatedAt: true,
+      _count: { select: { thoughts: true } },
     },
     orderBy: { updatedAt: 'desc' },
   })
@@ -175,12 +256,17 @@ export async function getUserBoards(userId: number) {
 // 📝 NOTE: [This function updates board metadata (title, description, etc.) but not thoughts. Thoughts are updated separately using thought-specific functions.]
 
 
+/** Update board metadata; return with thoughts and user for immediate UI refresh. */
 export async function updateBoard(id: number, data: {
   title?: string
   description?: string
   isPublic?: boolean
   isTemplate?: boolean
-}) {
+}): Promise<BoardWithRelations> {
+  // Why `data` vs `include` look different:
+  // - `data` lists fields we are updating on the Board model.
+  // - `include` specifies related data Prisma should return along with the updated board.
+  //   They serve different purposes, so the shapes differ.
   return await prisma.board.update({
     where: { id },
     data,
@@ -189,14 +275,18 @@ export async function updateBoard(id: number, data: {
       user: {
         select: { id: true, username: true, email: true },
       },
+      _count: {
+        select: { thoughts: true, workSessions: true },
+      },
     },
   })
 }
 
-export async function deleteBoard(id: number, userId: number) {
+/** Delete a board that belongs to a user (ownership enforced in where clause). */
+export async function deleteBoard(id: number, userId: number): Promise<void> {
   // Ensure user can only delete their own boards
-  return await prisma.board.delete({
-    where: { 
+  await prisma.board.delete({
+    where: {
       id,
       userId, // This ensures data isolation
     },
@@ -204,6 +294,7 @@ export async function deleteBoard(id: number, userId: number) {
 }
 
 // Thought Management
+/** Create a thought; if order not provided, auto-assign next position in section. */
 export async function createThought(data: {
   content: string
   section: string
@@ -214,7 +305,7 @@ export async function createThought(data: {
   status?: string
   aiGenerated?: boolean
   confidence?: number
-  metadata?: any
+  metadata?: Prisma.JsonValue
 }) {
   // Get the next position if not provided
   let position = data.order
@@ -245,6 +336,7 @@ export async function createThought(data: {
   })
 }
 
+/** Update an existing thought (content/section/position/metadata). */
 export async function updateThought(id: number, data: {
   content?: string
   section?: string
@@ -254,7 +346,7 @@ export async function updateThought(id: number, data: {
   status?: string
   aiGenerated?: boolean
   confidence?: number
-  metadata?: any
+  metadata?: Prisma.JsonValue
 }) {
   return await prisma.thought.update({
     where: { id },
@@ -262,7 +354,8 @@ export async function updateThought(id: number, data: {
   })
 }
 
-export async function deleteThought(id: number) {
+/** Delete a thought and compact positions in its section; transactional for consistency. */
+export async function deleteThought(id: number): Promise<void> {
   return await prisma.$transaction(async (tx) => {
     // Get the thought to be deleted
     const thoughtToDelete = await tx.thought.findUnique({
@@ -275,7 +368,7 @@ export async function deleteThought(id: number) {
     }
     
     // Delete the thought
-    const deletedThought = await tx.thought.delete({
+    await tx.thought.delete({
       where: { id },
     })
     
@@ -291,10 +384,11 @@ export async function deleteThought(id: number) {
       })
     }
     
-    return deletedThought
+    return
   })
 }
 
+/** Move a thought within or across sections while maintaining correct ordering. */
 export async function moveThought(id: number, targetSection: string, targetIndex: number) {
   return await prisma.$transaction(async (tx) => {
     // Get the current thought
@@ -370,9 +464,10 @@ export async function moveThought(id: number, targetSection: string, targetIndex
   })
 }
 
-export async function reorderThoughts(boardId: number, section: string, thoughtOrders: { id: number, position: number }[]) {
+/** Bulk reorder specific thoughts (id → position) inside a board/section. */
+export async function reorderThoughts(boardId: number, section: string, thoughtOrders: { id: number, position: number }[]): Promise<void> {
   // Update multiple thoughts' positions in a single transaction
-  return await prisma.$transaction(
+  await prisma.$transaction(
     thoughtOrders.map(({ id, position }) =>
       prisma.thought.update({
         where: { id, boardId }, // Ensure thought belongs to the board
@@ -381,14 +476,14 @@ export async function reorderThoughts(boardId: number, section: string, thoughtO
     )
   )
 }
-// QUESTION [ Lots of qquestions about the stuff aboove and below. How are these different than the API calls? Or are these just the results of hte API calls that call these functions to actually make database changes? Looking below. Why is edit here and update above? How are they different? ]
 
 
+/** Edit convenience for a subset of thought fields (content/priority/status/tags/flags). */
 export async function editThought(id: number, data: {
   content?: string
   priority?: string
   status?: string
-  tags?: any
+  tags?: string[]
   aiGenerated?: boolean
   confidence?: number
 }) {
@@ -399,6 +494,24 @@ export async function editThought(id: number, data: {
 }
 
 // Session and Activity Logging
+/**
+ * Activity logging policy
+ * -----------------------
+ * - Preferred path: create/reuse a WorkSession for a user+board and call logActivity(...)
+ *   with that sessionId for each discrete user action (append many activities per session).
+ * - Convenience path: call createSessionAndLogActivity(...) when you do not have a session and
+ *   want to create a new one and immediately log a single activity. This always creates
+ *   a new session and is best for one-off actions or scripts.
+ *
+ * Current code usage:
+ * - createSessionAndLogActivity(...) is used in API routes to log actions and create a new session per call.
+ * - logActivity(...) is currently only invoked by createSessionAndLogActivity(...).
+ *
+ * Guidance:
+ * - In request flows that already manage sessions, call logActivity(...) directly to avoid
+ *   creating multiple sessions for related actions.
+ */
+/** Create a work session to group activities for a user+board. */
 export async function createWorkSession(data: {
   boardId: number
   userId: number
@@ -418,6 +531,7 @@ export async function createWorkSession(data: {
   })
 }
 
+/** Append an activity to an existing work session (audit log). */
 export async function logActivity(data: {
   action: string
   detail: string
@@ -425,6 +539,23 @@ export async function logActivity(data: {
   entityType?: string
   entityId?: number
 }) {
+  /**
+   * Write an ActivityLog entry that is tied to an existing WorkSession.
+   *
+   * When to use:
+   * - You already have a valid sessionId (e.g., you created/retrieved a session earlier
+   *   in the same request or background job) and you want to append an activity to it.
+   *
+   * Inputs:
+   * - action: A short verb phrase for what happened (e.g., "updated_title").
+   * - detail: Human-readable details for audits/UX.
+   * - sessionId: Required. Associates the activity to a board/user via the session.
+   * - entityType/entityId: Optional target reference (e.g., Thought, Board, etc.).
+   *
+   * Notes:
+   * - This function does not create or look up a WorkSession.
+   * - In this codebase, it is currently used only by logActivityToBoard(...).
+   */
   return await prisma.activityLog.create({
     data: {
       action: data.action,
@@ -437,7 +568,8 @@ export async function logActivity(data: {
 }
 
 // Convenience function for simple activity logging
-export async function logActivityToBoard(data: {
+/** Convenience: create a work session and immediately log one activity. */
+export async function createSessionAndLogActivity(data: {
   action: string
   detail: string
   boardId: number
@@ -445,7 +577,28 @@ export async function logActivityToBoard(data: {
   entityType?: string
   entityId?: number
 }) {
-  // Create or get current session for this board/user
+  /**
+   * Convenience helper: create a new WorkSession for the given board/user
+   * and immediately log a single activity into that session.
+   *
+   * When to use:
+   * - You do not have a session yet, but you know the boardId and userId.
+   * - Common in one-off API endpoints that perform a single action per request
+   *   (e.g., "updated diagram title").
+   *
+   * Behavior:
+   * - Always creates a NEW WorkSession record (no reuse/lookup).
+   * - Calls logActivity(...) with the newly created session.id.
+   *
+   * Prefer logActivity(...) when:
+   * - You are within an existing, ongoing session and want to avoid creating
+   *   multiple sessions for related actions.
+   *
+   * Typical user contexts:
+   * - API handler logs a single user action tied to a board.
+   * - Test/admin utilities that need quick activity logging without session management.
+   */
+  // Create a new session for this board/user
   const session = await createWorkSession({
     boardId: data.boardId,
     userId: data.userId,
@@ -463,6 +616,7 @@ export async function logActivityToBoard(data: {
 }
 
 // Database Health Check
+/** Lightweight connectivity probe for health endpoints and test pages. */
 export async function healthCheck() {
   try {
     await prisma.$queryRaw`SELECT 1`
@@ -473,6 +627,7 @@ export async function healthCheck() {
 }
 
 // Graceful Shutdown
+/** Close Prisma connections; used during process shutdown or test cleanup. */
 export async function disconnectDatabase() {
   await prisma.$disconnect()
 }
@@ -484,6 +639,7 @@ export async function disconnectDatabase() {
 const DEFAULT_USER_EMAIL = 'demo@chapp.local'
 const DEFAULT_BOARD_TITLE = 'My GAPS Diagram'
 
+/** Demo helper: ensure a default user exists (temporary before auth). */
 export async function getOrCreateDefaultUser() {
   try {
     // Try to find existing default user
@@ -512,6 +668,7 @@ export async function getOrCreateDefaultUser() {
 
 // 📝 NOTE: [This function creates a default board for new users so they don't start with an empty app. Used for better UX.]
 
+/** Demo helper: ensure a default board exists for a user (temporary before auth). */
 export async function getOrCreateDefaultBoard(userId: number) {
   try {
     // Get user's boards
@@ -542,6 +699,7 @@ export async function getOrCreateDefaultBoard(userId: number) {
 /**
  * Create a new conversation within a board
  */
+/** Create a new conversation within a board (includes messages for immediate UI). */
 export async function createConversation(data: {
   boardId: number
   title?: string
@@ -565,6 +723,7 @@ export async function createConversation(data: {
 /**
  * Get a conversation with all its messages
  */
+/** Get a conversation with all its messages ordered by sequence. */
 export async function getConversationWithMessages(conversationId: number) {
   return await prisma.conversation.findUnique({
     where: { id: conversationId },
@@ -579,13 +738,14 @@ export async function getConversationWithMessages(conversationId: number) {
 /**
  * Add a message to a conversation
  */
+/** Add a message and increment the conversation's message count transactionally. */
 export async function addMessage(data: {
   conversationId: number
   role: string // human, ai, system, function
   content: string
   model?: string
   tokens?: number
-  metadata?: any
+  metadata?: Prisma.JsonValue
 }) {
   // Get current message count for sequence number
   const conversation = await prisma.conversation.findUnique({
@@ -627,6 +787,7 @@ export async function addMessage(data: {
 /**
  * Update conversation summary
  */
+/** Update conversation summary text (used by AI summarization or admin tools). */
 export async function updateConversationSummary(conversationId: number, summary: string) {
   return await prisma.conversation.update({
     where: { id: conversationId },
@@ -637,6 +798,7 @@ export async function updateConversationSummary(conversationId: number, summary:
 /**
  * Get all conversations for a board
  */
+/** List all conversations for a board with messages ordered by sequence. */
 export async function getBoardConversations(boardId: number) {
   return await prisma.conversation.findMany({
     where: { boardId },

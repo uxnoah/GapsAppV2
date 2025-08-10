@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState } from 'react'
-import { GapsSection, GapsItem, GapsDiagram } from '@/lib/types'
+import { GapsSection, GapsItem, GapsDiagram, ThoughtApi, DiagramApi } from '@/lib/types'
 import { 
   createDefaultDiagram, 
   createGapsItem, 
@@ -11,14 +11,14 @@ import {
 } from '@/lib/utils'
 import { GapsBox } from './gaps-box'
 import { GapsItemComponent } from './gaps-item'
+import { api, routes, getApiErrorMessage } from '@/lib/api'
+import type { ThoughtResponse } from '@/lib/types'
 
 
-/**
- * 🧠 MY THOUGHTS: 
- * ❓ QUESTION: 
- * 💡 IDEA: 
- * 📝 NOTE: 
- */
+//
+// Developer note: This file uses the centralized API wrapper (`src/lib/api.ts`).
+// All network errors are normalized to `ApiError`; UI logs use `getApiErrorMessage`.
+// Thought responses conform to `ThoughtResponse` with a `thought` DTO (id, content, section, order, ...).
 
 /**
  * GAPS Canvas Component - Main Application Container
@@ -69,8 +69,7 @@ export const GapsCanvas = () => {
   // =============================================================================
   
   // 🧠 MY THOUGHTS: The state is organized into logical groups - core data, UI state, and DOM refs
-  // 💡 IDEA: We could use a custom hook to manage related state together
-  // 📝 NOTE: Each state variable has a clear purpose - this makes debugging easier
+  // State variables are explicitly separated for clarity; consider extracting to a custom hook later.
   
   // Default diagram for loading state
   const defaultDiagram: GapsDiagram = {
@@ -104,51 +103,41 @@ export const GapsCanvas = () => {
   // =============================================================================
 
   /*
-   * 💡 IDEA We could add a loading spinner while data is being fetched
-   * 🔧 TODO Add better error handling and logging
+   * Shows a loading state while data is fetched
    * Loads the current diagram data from the backend API
    * This function fetches the complete diagram state including all thoughts/items
    * and their metadata from the database.
    */
   const loadDiagramFromAPI = async () => {
     try {
-      const response = await fetch('/api/diagram')
-      
-      if (response.ok) {
-        const data = await response.json()
-        // Use the thoughts directly from database with real IDs and full metadata
-        const items: GapsItem[] = data.thoughts ? data.thoughts.map((thought: any) => ({
-          id: thought.id, // Real database ID
-          text: thought.text,
-          section: thought.section,
-          order: thought.order,
-          
-          // Metadata and organization
-          tags: thought.tags || [],
-          priority: thought.priority,
-          status: thought.status,
-          
-          // AI and collaboration
-          aiGenerated: thought.aiGenerated || false,
-          confidence: thought.confidence,
-          metadata: thought.metadata,
-          
-          // Timestamps
-          createdAt: new Date(thought.createdAt),
-          updatedAt: new Date(thought.updatedAt)
-        })) : []
+      const data: DiagramApi = await api.get<DiagramApi>(routes.diagram)
+      // Map API ThoughtDto-like records to strict GapsItem with safe defaults
+      // - content -> text
+      // - section stays the same
+      // - order stays the same
+      // - createdAt/updatedAt coerced to Date
+      const items: GapsItem[] = Array.isArray(data.thoughts)
+        ? data.thoughts.map((thought: ThoughtApi) => ({
+            id: String(thought.id ?? generateId()),
+            text: String(thought.text ?? ''),
+            section: (thought.section ?? 'status') as GapsSection,
+            order: Number(thought.order ?? 0),
+            createdAt: new Date(thought.createdAt ?? Date.now()),
+            updatedAt: new Date(thought.updatedAt ?? Date.now()),
+          }))
+        : []
 
         setDiagram({
-          id: data.id || generateId(), // Use API ID or generate new one
+          id: String(data.id ?? generateId()), // Use API ID or generate new one
           title: data.title || 'GAPS Diagram',
           items,
           createdAt: new Date(),
           updatedAt: new Date(),
           version: 1
         })
-      }
+        console.log('✅ Diagram loaded (items:', items.length, ')')
     } catch (error) {
-      console.error('Failed to load diagram from API:', error)
+      console.error('Failed to load diagram from API:', getApiErrorMessage(error))
     }
   }
 
@@ -197,20 +186,11 @@ export const GapsCanvas = () => {
         plan: ['Plan item 1', 'Plan item 2']
       }
       
-      const response = await fetch('/api/diagram', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(testData)
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
+      await api.put(routes.diagram, testData)
 
-        // Use the response data directly to update the frontend
-        if (result.success && result.diagram) {
-          const diagramData = result.diagram
+      // Update the frontend using the same data we sent (since this is a simulation)
+      {
+        const diagramData = testData
           const items: GapsItem[] = []
           let idCounter = 1
 
@@ -259,14 +239,14 @@ export const GapsCanvas = () => {
             })
           })
 
-                  setDiagram(prev => ({
+        setDiagram(prev => ({
           ...prev,
           title: diagramData.title || '',
           items,
           updatedAt: new Date()
         }))
-        }
-        
+      }
+
         // AI notifies completion
         await fetch('/api/ai-notify', {
           method: 'POST',
@@ -277,14 +257,10 @@ export const GapsCanvas = () => {
           })
         })
         
-        setIsThinking(false)
-        console.log('🤖 AI: "I\'ve loaded test data into your diagram!"')
-      } else {
-        console.error('🧪 PUT request failed:', response.status, response.statusText)
-        setIsThinking(false)
-      }
+      setIsThinking(false)
+      console.log('🤖 AI: "I\'ve loaded test data into your diagram!"')
     } catch (error) {
-      console.error('🧪 Error sending test data:', error)
+      console.error('🧪 Error sending test data:', getApiErrorMessage(error))
       setIsThinking(false)
     }
   }
@@ -298,44 +274,36 @@ export const GapsCanvas = () => {
     await new Promise(resolve => setTimeout(resolve, 900))
     
     try {
-      // Simulate external API call to add a thought
-      const response = await fetch('/api/thoughts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+      // Simulate external API call to add a thought (via wrapper)
+      const result = await api.post<ThoughtResponse>(
+        routes.thoughts,
+        { 
           content: `AI Suggestion: Optimize database queries (${new Date().toLocaleTimeString()})`,
           section: 'plan',
           aiGenerated: true,
           confidence: 0.85,
           tags: ['ai-generated', 'performance'],
           priority: 'medium'
+        }
+      )
+
+      // Refresh diagram to show the change (simulating external update)
+      await loadDiagramFromAPI()
+      
+      // AI notifies completion (keep raw fetch; not part of user-facing API)
+      await fetch('/api/ai-notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          hasChanges: true,
+          message: 'New thought added to diagram'
         })
       })
       
-      if (response.ok) {
-        const result = await response.json()
-
-        // Refresh diagram to show the change (simulating external update)
-        await loadDiagramFromAPI()
-        
-        // AI notifies completion
-        await fetch('/api/ai-notify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            hasChanges: true,
-            message: 'New thought added to diagram'
-          })
-        })
-        
-        setIsThinking(false)
-        console.log('🤖 AI: "I\'ve added a new thought to your diagram!"')
-      } else {
-        console.error('❌ Simulated API add failed:', response.status)
-        setIsThinking(false)
-      }
+      setIsThinking(false)
+      console.log('🤖 AI: "I\'ve added a new thought to your diagram!"')
     } catch (error) {
-      console.error('❌ Error in simulated add:', error)
+      console.error('❌ Error in simulated add:', getApiErrorMessage(error))
       setIsThinking(false)
     }
   }
@@ -359,39 +327,33 @@ export const GapsCanvas = () => {
     
     try {
       // Simulate external API call to edit a thought
-      const response = await fetch(`/api/thoughts/${randomThought.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+      await api.put<ThoughtResponse>(
+        routes.thoughtById(String(randomThought.id)),
+        {
           content: `${randomThought.text} (AI Enhanced: ${new Date().toLocaleTimeString()})`,
           priority: 'high',
           tags: ['ai-enhanced', 'updated'],
-          confidence: 0.92
+          confidence: 0.92,
+        }
+      )
+
+      // Refresh diagram to show the change
+      await loadDiagramFromAPI()
+      
+      // AI notifies completion
+      await fetch('/api/ai-notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          hasChanges: true,
+          message: 'Thought edited successfully'
         })
       })
       
-      if (response.ok) {
-        // Refresh diagram to show the change
-        await loadDiagramFromAPI()
-        
-        // AI notifies completion
-        await fetch('/api/ai-notify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            hasChanges: true,
-            message: 'Thought edited successfully'
-          })
-        })
-        
-        setIsThinking(false)
-        console.log('🤖 AI: "I\'ve enhanced one of your thoughts!"')
-      } else {
-        console.error('❌ Simulated API edit failed:', response.status)
-        setIsThinking(false)
-      }
+      setIsThinking(false)
+      console.log('🤖 AI: "I\'ve enhanced one of your thoughts!"')
     } catch (error) {
-      console.error('❌ Error in simulated edit:', error)
+      console.error('❌ Error in simulated edit:', getApiErrorMessage(error))
       setIsThinking(false)
     }
   }
@@ -416,34 +378,26 @@ export const GapsCanvas = () => {
     
     try {
       // Simulate external API call to delete a thought
-      const response = await fetch(`/api/thoughts/${randomThought.id}`, {
-        method: 'DELETE'
+      await api.del<void>(routes.thoughtById(String(randomThought.id)))
+      console.log('✅ Delete successful')
+
+      // Refresh diagram to show the change
+      await loadDiagramFromAPI()
+      
+      // AI notifies completion
+      await fetch('/api/ai-notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          hasChanges: true,
+          message: 'Thought deleted successfully'
+        })
       })
       
-      if (response.ok) {
-        console.log('✅ Delete successful')
-        // Refresh diagram to show the change
-        await loadDiagramFromAPI()
-        
-        // AI notifies completion
-        await fetch('/api/ai-notify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            hasChanges: true,
-            message: 'Thought deleted successfully'
-          })
-        })
-        
-        setIsThinking(false)
-        console.log('🤖 AI: "I\'ve removed that thought from your diagram!"')
-      } else {
-        const errorText = await response.text()
-        console.error('❌ Simulated API delete failed:', response.status, errorText)
-        setIsThinking(false)
-      }
+      setIsThinking(false)
+      console.log('🤖 AI: "I\'ve removed that thought from your diagram!"')
     } catch (error) {
-      console.error('❌ Error in simulated delete:', error)
+      console.error('❌ Error in simulated delete:', getApiErrorMessage(error))
       setIsThinking(false)
     }
   }
@@ -472,16 +426,12 @@ export const GapsCanvas = () => {
     
     try {
       // Simulate external API call to move a thought
-      const response = await fetch(`/api/thoughts/${randomThought.id}/move`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          targetSection,
-          targetIndex
-        })
-      })
+      await api.patch<void>(
+        routes.thoughtMove(String(randomThought.id)),
+        { targetSection, targetIndex }
+      )
       
-      if (response.ok) {
+      {
         console.log('✅ Move successful')
         // Refresh diagram to show the change
         await loadDiagramFromAPI()
@@ -498,13 +448,9 @@ export const GapsCanvas = () => {
         
         setIsThinking(false)
         console.log('🤖 AI: "I\'ve moved that thought to a better location!"')
-      } else {
-        const errorText = await response.text()
-        console.error('❌ Simulated API move failed:', response.status, errorText)
-        setIsThinking(false)
       }
     } catch (error) {
-      console.error('❌ Error in simulated move:', error)
+      console.error('❌ Error in simulated move:', getApiErrorMessage(error))
       setIsThinking(false)
     }
   }
@@ -558,15 +504,7 @@ export const GapsCanvas = () => {
       for (let i = 0; i < changes.length; i++) {
         const change = changes[i]
 
-        const response = await fetch('/api/thoughts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(change.data)
-        })
-        
-        if (response.ok) {
-          const result = await response.json()
-        }
+        await api.post<ThoughtResponse>(routes.thoughts, change.data)
         
         // Small delay between AI actions to show progression
         await new Promise(resolve => setTimeout(resolve, 800))
@@ -589,7 +527,7 @@ export const GapsCanvas = () => {
       console.log('🤖 AI: "I\'ve analyzed your diagram and added 3 helpful suggestions!"')
       
     } catch (error) {
-      console.error('❌ Error in AI simulation:', error)
+      console.error('❌ Error in AI simulation:', getApiErrorMessage(error))
       setIsThinking(false)
     }
   }
@@ -600,48 +538,41 @@ export const GapsCanvas = () => {
     
     try {
       // Call granular API to add thought
-      const response = await fetch('/api/thoughts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: 'New thought', section })
-      })
+      const result = await api.post<ThoughtResponse>(
+        routes.thoughts,
+        { content: 'New thought', section }
+      )
+      console.log('✅ Created thought via API:', result.thought.id)
       
-      if (response.ok) {
-        const result = await response.json()
-        console.log('✅ Created thought via API:', result.thought.id)
-        
-        // Add to local state with real database ID
-        const newItem: GapsItem = {
-          id: result.thought.id.toString(),
-          text: result.thought.content,    // API sends 'content', we use as 'text'
-          section: result.thought.section,
-          order: result.thought.order,
-          createdAt: new Date(result.thought.createdAt),
-          updatedAt: new Date(result.thought.updatedAt)
-        }
-        
-        setDiagram(prev => ({
-          ...prev,
-          items: [...prev.items, newItem].sort((a, b) => {
-            // Sort by section first, then by order within section
-            if (a.section !== b.section) {
-              const sectionOrder = ['status', 'goal', 'analysis', 'plan']
-              return sectionOrder.indexOf(a.section) - sectionOrder.indexOf(b.section)
-            }
-            return a.order - b.order
-          }),
-          updatedAt: new Date(),
-          version: prev.version + 1
-        }))
-        
-        // Automatically start editing the new item
-        setEditingItemId(newItem.id)
-        setEditText('New thought')
-      } else {
-        console.error('❌ Failed to create thought:', response.status)
+      // Add to local state with real database ID
+      const newItem: GapsItem = {
+        id: String(result.thought.id),
+        text: result.thought.content,
+        section: result.thought.section,
+        order: result.thought.order,
+        createdAt: new Date(result.thought.createdAt as any),
+        updatedAt: new Date(result.thought.updatedAt as any)
       }
+      
+      setDiagram(prev => ({
+        ...prev,
+        items: [...prev.items, newItem].sort((a, b) => {
+          // Sort by section first, then by order within section
+          if (a.section !== b.section) {
+            const sectionOrder = ['status', 'goal', 'analysis', 'plan']
+            return sectionOrder.indexOf(a.section) - sectionOrder.indexOf(b.section)
+          }
+          return a.order - b.order
+        }),
+        updatedAt: new Date(),
+        version: prev.version + 1
+      }))
+      
+      // Automatically start editing the new item
+      setEditingItemId(newItem.id)
+      setEditText('New thought')
     } catch (error) {
-      console.error('❌ Error creating thought:', error)
+      console.error('❌ Error creating thought:', getApiErrorMessage(error))
     }
   }
 
@@ -650,25 +581,18 @@ export const GapsCanvas = () => {
     
     try {
       // Call granular API to delete thought
-      const response = await fetch(`/api/thoughts/${itemId}`, {
-        method: 'DELETE'
-      })
+      await api.del<void>(routes.thoughtById(String(itemId)))
+      console.log('✅ Deleted thought via API:', itemId)
       
-      if (response.ok) {
-        console.log('✅ Deleted thought via API:', itemId)
-        
-        // Update local state
-        setDiagram(prev => ({
-          ...prev,
-          items: prev.items.filter(item => item.id !== itemId),
-          updatedAt: new Date(),
-          version: prev.version + 1
-        }))
-      } else {
-        console.error('❌ Failed to delete thought:', response.status)
-      }
+      // Update local state
+      setDiagram(prev => ({
+        ...prev,
+        items: prev.items.filter(item => item.id !== itemId),
+        updatedAt: new Date(),
+        version: prev.version + 1
+      }))
     } catch (error) {
-      console.error('❌ Error deleting thought:', error)
+      console.error('❌ Error deleting thought:', getApiErrorMessage(error))
     }
   }
 
@@ -682,14 +606,10 @@ export const GapsCanvas = () => {
     
     try {
       // Call granular API to update thought content
-      const response = await fetch(`/api/thoughts/${itemId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: editText })
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
+      const result = await api.put<ThoughtResponse>(
+        routes.thoughtById(String(itemId)),
+        { content: editText }
+      )
         console.log('✅ Updated thought via API:', itemId)
         
         // Update local state
@@ -697,7 +617,7 @@ export const GapsCanvas = () => {
           ...prev,
           items: prev.items.map(item => 
             item.id === itemId 
-              ? { ...item, text: editText, updatedAt: new Date(result.thought.updatedAt) }
+              ? { ...item, text: editText, updatedAt: new Date(result.thought.updatedAt as any) }
               : item
           ),
           updatedAt: new Date(),
@@ -706,11 +626,9 @@ export const GapsCanvas = () => {
         
         setEditingItemId(null)
         setEditText('')
-      } else {
-        console.error('❌ Failed to update thought:', response.status)
-      }
+      
     } catch (error) {
-      console.error('❌ Error updating thought:', error)
+      console.error('❌ Error updating thought:', getApiErrorMessage(error))
     }
   }
 
@@ -781,20 +699,10 @@ export const GapsCanvas = () => {
 
       console.log(`🚀 SAVE #${saveId} API Data being sent:`, apiData)
 
-      const response = await fetch('/api/diagram', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(apiData)
-      })
+      await api.put<void>(routes.diagram, apiData)
 
-      console.log(`🚀 SAVE #${saveId} Response status:`, response.status)
-
-      if (response.ok) {
+      {
         console.log(`✅ SAVE #${saveId} Successfully saved to database`)
-      } else {
-        console.error(`❌ SAVE #${saveId} Failed to save to database:`, response.status)
-        const errorText = await response.text()
-        console.error(`❌ SAVE #${saveId} Error details:`, errorText)
       }
     } catch (error) {
       console.error(`❌ SAVE #${saveId} Error saving to database:`, error)
@@ -886,10 +794,10 @@ export const GapsCanvas = () => {
       }
       setDiagram(updatedDiagram)
       
-      // NOTE: Save removed from handleDrop - handleItemDrop handles saves
-      console.log('🎯 handleDrop: State updated, but save delegated to handleItemDrop')
+      // Save removed from handleDrop - handleItemDrop handles saves
+      console.log('handleDrop: State updated, save delegated to handleItemDrop')
     } catch (error) {
-      console.error('Error parsing drag data:', error)
+      console.error('Error parsing drag data:', getApiErrorMessage(error))
     }
   }
 
@@ -962,38 +870,104 @@ export const GapsCanvas = () => {
       
       // Call granular API to move thought
       try {
-        const response = await fetch(`/api/thoughts/${dragData.itemId}/move`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            targetSection: targetSection, 
-            targetIndex: targetIndex 
-          })
+        await api.patch<void>(routes.thoughtMove(String(dragData.itemId)), {
+          targetSection: targetSection, 
+          targetIndex: targetIndex 
         })
-        
-        if (response.ok) {
-          console.log('✅ Moved thought via API:', dragData.itemId)
-        } else {
-          console.error('❌ Failed to move thought:', response.status)
-          // TODO: Could implement rollback here if API fails
-        }
+        console.log('✅ Moved thought via API:', dragData.itemId)
       } catch (error) {
-        console.error('❌ Error moving thought:', error)
+        console.error('❌ Error moving thought:', getApiErrorMessage(error))
       }
     } catch (error) {
-      console.error('Error parsing drag data:', error)
+      console.error('Error parsing drag data:', getApiErrorMessage(error))
     }
   }
 
   // Manual test functions for debugging
   const testSave = () => {
-    console.log('🧪 MANUAL SAVE: Saving entire diagram to database')
+    console.log('Saving entire diagram to database (manual test)')
     saveDiagramToAPI()
   }
 
   const testLoad = () => {
     console.log('🧪 MANUAL LOAD: Loading diagram from database')
     loadDiagramFromAPI()
+  }
+
+  const testTitleUpdateAPI = async () => {
+    console.log('🎯 Testing title update API...')
+    try {
+      const data = await api.put<{ success: boolean; message: string; diagram: DiagramApi }>(
+        routes.diagramTitle,
+        { title: 'AI Updated Title 🚀' }
+      )
+      console.log('✅ Title update API successful:', data)
+      // Reload the diagram to show the updated title
+      await loadDiagramFromAPI()
+    } catch (error) {
+      console.error('❌ Error testing title update API:', getApiErrorMessage(error))
+    }
+  }
+
+  // Master orchestrator to run all debug actions sequentially
+  const runAllDebugTests = async () => {
+    console.log('🚀 Run All Tests: start')
+    try {
+      // 1) Load + Save current diagram
+      await loadDiagramFromAPI()
+      await saveDiagramToAPI()
+
+      // 2) Deterministic CRUD on a single item
+      let createdId: string | null = null
+      // Create
+      {
+        const resp = await fetch('/api/thoughts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: 'RunAll: seed thought', section: 'status' })
+        })
+        if (resp.ok) {
+          const json = await resp.json()
+          createdId = String(json?.thought?.id ?? '')
+          await loadDiagramFromAPI()
+        }
+      }
+      // Edit
+      if (createdId) {
+        await fetch(`/api/thoughts/${createdId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: 'RunAll: edited thought' })
+        })
+        await loadDiagramFromAPI()
+      }
+      // Move
+      if (createdId) {
+        await fetch(`/api/thoughts/${createdId}/move`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetSection: 'analysis', targetIndex: 0 })
+        })
+        await loadDiagramFromAPI()
+      }
+      // Delete
+      if (createdId) {
+        await fetch(`/api/thoughts/${createdId}`, { method: 'DELETE' })
+        await loadDiagramFromAPI()
+      }
+
+      // 3) Seed bulk test data
+      await sendTestDataToAPI()
+      await loadDiagramFromAPI()
+
+      // 4) AI style flows
+      await simulateAIChanges()
+      await testTitleUpdateAPI()
+      await simulateAIBulkUpdate()
+      await simulateAIRapidFire()
+
+      console.log('✅ Run All Tests: complete')
+    } catch (error) {
+      console.error('❌ Run All Tests failed:', getApiErrorMessage(error))
+    }
   }
 
   // AI Simulation - Bulk Update (simulates real chat flow)
@@ -1062,7 +1036,7 @@ export const GapsCanvas = () => {
         setIsThinking(false)
       }
     } catch (error) {
-      console.error('❌ Error in AI bulk update:', error)
+      console.error('❌ Error in AI bulk update:', getApiErrorMessage(error))
       setIsThinking(false)
     }
   }
@@ -1078,62 +1052,66 @@ export const GapsCanvas = () => {
     // Step 2: AI processes (simulate thinking time)
     await new Promise(resolve => setTimeout(resolve, 2000))
     
-    const operations = []
+    const operations = [] as Promise<unknown>[]
     
     // Add multiple thoughts rapidly
     operations.push(
-      fetch('/api/thoughts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: 'AI Added: Critical security vulnerability',
-          section: 'status',
-          priority: 'high',
-          tags: ['security', 'urgent']
-        })
+      api.post<ThoughtResponse>(routes.thoughts, {
+        content: 'AI Added: Critical security vulnerability',
+        section: 'status',
+        priority: 'high',
+        tags: ['security', 'urgent'],
       })
     )
     
     operations.push(
-      fetch('/api/thoughts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: 'AI Added: Implement zero-trust architecture',
-          section: 'plan',
-          priority: 'high',
-          tags: ['security', 'architecture']
-        })
+      api.post<ThoughtResponse>(routes.thoughts, {
+        content: 'AI Added: Implement zero-trust architecture',
+        section: 'plan',
+        priority: 'high',
+        tags: ['security', 'architecture'],
       })
     )
 
     // If we have existing thoughts, try to edit and move them
-    if (diagram.items.length > 0) {
-      const firstItem = diagram.items[0]
-      const lastItem = diagram.items[diagram.items.length - 1]
+    // Fetch fresh data to avoid stale IDs after prior bulk updates
+    let firstItem: GapsItem | null = null
+    let lastItem: GapsItem | null = null
+    try {
+      const json: DiagramApi = await api.get<DiagramApi>(routes.diagram)
+      const thoughts = Array.isArray(json?.thoughts) ? json.thoughts : []
+      if (thoughts.length > 0) {
+        const t0 = thoughts[0]
+        firstItem = {
+          id: String(t0?.id ?? generateId()),
+          text: String(t0?.text ?? ''),
+          section: (t0?.section ?? 'status') as GapsSection,
+          order: Number(t0?.order ?? 0),
+          createdAt: new Date(t0?.createdAt ?? Date.now()),
+          updatedAt: new Date(t0?.updatedAt ?? Date.now()),
+        }
+        const last = thoughts[thoughts.length - 1]
+        lastItem = {
+          id: String(last?.id ?? generateId()),
+          text: String(last?.text ?? ''),
+          section: (last?.section ?? 'status') as GapsSection,
+          order: Number(last?.order ?? 0),
+          createdAt: new Date(last?.createdAt ?? Date.now()),
+          updatedAt: new Date(last?.updatedAt ?? Date.now()),
+        }
+      }
+    } catch {}
+    if (firstItem && lastItem) {
       
       // Edit an existing thought
       operations.push(
-        fetch(`/api/thoughts/${firstItem.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            content: `${firstItem.text} (AI Enhanced)`
-          })
-        })
+        api.put<ThoughtResponse>(routes.thoughtById(String(firstItem.id)), { content: `${firstItem.text} (AI Enhanced)` })
       )
       
       // Move a thought to a different section
       if (lastItem.section !== 'analysis') {
         operations.push(
-          fetch(`/api/thoughts/${lastItem.id}/move`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              targetSection: 'analysis',
-              targetIndex: 0
-            })
-          })
+          api.patch<void>(routes.thoughtMove(String(lastItem.id)), { targetSection: 'analysis', targetIndex: 0 })
         )
       }
     }
@@ -1142,7 +1120,6 @@ export const GapsCanvas = () => {
       // Step 3: AI makes multiple database changes
       console.log(`🔥 AI making ${operations.length} simultaneous changes...`)
       const results = await Promise.all(operations)
-      
       console.log('✅ AI rapid fire completed:', results.length, 'operations')
       
       // Step 4: AI notifies frontend it's done
@@ -1161,7 +1138,7 @@ export const GapsCanvas = () => {
       console.log('🤖 AI: "I\'ve analyzed your diagram and made several improvements!"')
       
     } catch (error) {
-      console.error('❌ Error in AI rapid fire:', error)
+      console.error('❌ Error in AI rapid fire:', getApiErrorMessage(error))
       setIsThinking(false)
     }
   }
@@ -1184,7 +1161,7 @@ export const GapsCanvas = () => {
           <div className="bg-white rounded-lg p-8 shadow-xl">
             <div className="flex items-center space-x-3">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-              <div className="text-lg font-semibold text-gray-800">AI is thinking...</div>
+              <div className="text-lg font-semibold text-gray-800">Working...</div>
             </div>
             <div className="mt-2 text-sm text-gray-600">Please wait while I process your request</div>
           </div>
@@ -1464,6 +1441,15 @@ export const GapsCanvas = () => {
         {/* Debugging Panel */}
         <div className="w-96 bg-white rounded-lg shadow-lg p-4">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">🔧 Debugging</h2>
+          <div className="mb-4">
+            <button
+              onClick={runAllDebugTests}
+              className="w-full px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-left"
+              title="Run all debug panel tests sequentially"
+            >
+              🚀 Run All Tests
+            </button>
+          </div>
           
           {/* Breadcrumbs Section */}
           <div className="mb-6">
@@ -1554,6 +1540,13 @@ export const GapsCanvas = () => {
                 title="Simulate AI making multiple changes via API"
               >
                 🤖 AI Sim
+              </button>
+              <button
+                onClick={testTitleUpdateAPI}
+                className="px-2 py-2 text-sm bg-teal-100 text-teal-700 rounded hover:bg-teal-200 transition-colors text-left border border-teal-200 col-span-2"
+                title="Test the new title update API endpoint"
+              >
+                🎯 Test Title API
               </button>
             </div>
           </div>

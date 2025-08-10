@@ -5,6 +5,16 @@
  * Run with: npx tsx scripts/test-database.ts
  */
 
+/**
+ * ⚠️ OUTDATED NOTICE
+ * ==================
+ * This script targets an older testing flow and partially outdated API/data shapes.
+ * - Keep for reference only; do not rely on it for current application behavior.
+ * - Prefer the visual test harness at `/test-database` and the newer endpoints under
+ *   `/api/diagram` and `/api/thoughts` for CRUD and move operations.
+ * - When ready, we will either update this script or remove it.
+ */
+
 import bcrypt from 'bcryptjs'
 import {
   prisma,
@@ -13,7 +23,7 @@ import {
   createBoard,
   getBoardById,
   createThought,
-  logActivityToBoard,
+  createSessionAndLogActivity,
   healthCheck,
   disconnectDatabase,
 } from '../src/lib/database'
@@ -85,7 +95,7 @@ async function testDatabase() {
 
     // Test 6: Log Activity
     console.log('\n6. Testing activity logging...')
-    await logActivityToBoard({
+    await createSessionAndLogActivity({
       action: 'test_run',
       detail: 'Database test script execution',
       boardId: board.id,

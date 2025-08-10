@@ -7,8 +7,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // User Model - Authentication and Profile
@@ -69,7 +70,7 @@ model Board {
 model Thought {
   id        Int      @id @default(autoincrement())
   content   String
-  section   String   // status, goal, analysis, plan
+  section   String   // status, goal, analysis, plan, sandbox
   
   // Board ownership
   boardId   Int      @map("board_id")

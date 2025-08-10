@@ -1,30 +1,24 @@
 /**
  * INDIVIDUAL THOUGHT CRUD API ROUTE
  * =================================
- * This file handles HTTP requests for updating and deleting specific thoughts.
- * 
  * Endpoints:
  * - PUT /api/thoughts/[id] - Update an existing thought
  * - DELETE /api/thoughts/[id] - Delete a thought
- * 
- * URL Parameters:
- * - [id] - The database ID of the thought to modify
- * 
- * Data Flow:
- * 1. Frontend sends request with thought ID in URL
- * 2. API validates the request and thought ID
- * 3. Performs database operation (update or delete)
- * 4. Returns success/error response
- * 
- * Key Features:
- * - Full metadata support for updates
- * - Automatic position rebalancing on delete
- * - Database transaction safety
- * - Error handling and validation
+ *
+ * Contracts (Types):
+ * - PUT Request: ThoughtUpdateRequest
+ * - PUT Response: ThoughtResponse { success: true, thought: ThoughtDto }
+ * - DELETE Response: { success: true, message: string }
+ *
+ * Notes:
+ * - Order is derived from DB position; we map DB position -> ThoughtDto.order
+ * - Single error surface: route returns { error } with status; the client wrapper converts non-OK results to ApiError
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { updateThought, deleteThought } from '@/lib/database'
+import { logActivity } from '@/lib/activity'
+import type { ThoughtUpdateRequest, ThoughtResponse } from '@/lib/types'
 
 /**
  * PUT /api/thoughts/[id] - Edit thought content and metadata
@@ -69,7 +63,7 @@ export async function PUT(
 ) {
   try {
     // Extract all possible fields from the request body
-    const { content, tags, priority, status, aiGenerated, confidence, metadata } = await request.json()
+    const { content, tags, priority, status, aiGenerated, confidence, metadata } = (await request.json()) as ThoughtUpdateRequest
     const thoughtId = parseInt(params.id)
     
     console.log('🎯 PUT /api/thoughts/' + thoughtId + ' called with:', { content, tags, priority, status })
@@ -94,10 +88,20 @@ export async function PUT(
     })
     
     console.log('✅ Updated thought:', thoughtId)
+
+    await logActivity({
+      action: 'update_thought',
+      detail: 'Updated thought content/metadata',
+      boardId: undefined,
+      userId: undefined,
+      entityType: 'thought',
+      entityId: updatedThought.id,
+      source: 'backend'
+    })
     
     // Return the updated thought with all its metadata
     // Note: We map database field names to frontend field names for consistency
-    return NextResponse.json({
+    const payload: ThoughtResponse = {
       success: true,
       thought: {
         id: updatedThought.id,
@@ -119,7 +123,8 @@ export async function PUT(
         createdAt: updatedThought.createdAt,
         updatedAt: updatedThought.updatedAt
       }
-    })
+    }
+    return NextResponse.json< ThoughtResponse >(payload)
     
   } catch (error) {
     console.error('❌ Error updating thought:', error)
@@ -166,6 +171,16 @@ export async function DELETE(
     await deleteThought(thoughtId)
     
     console.log('✅ Deleted thought:', thoughtId)
+
+    await logActivity({
+      action: 'delete_thought',
+      detail: 'Deleted thought',
+      boardId: undefined,
+      userId: undefined,
+      entityType: 'thought',
+      entityId: thoughtId,
+      source: 'backend'
+    })
     
     return NextResponse.json({
       success: true,

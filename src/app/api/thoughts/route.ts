@@ -1,27 +1,28 @@
 /**
  * THOUGHTS API ROUTE
  * ==================
- * This file handles HTTP requests for creating new thoughts in the GAPS diagram.
- * 
  * Endpoint: POST /api/thoughts
- * Purpose: Add a new thought/idea to any of the four GAPS sections
- * 
+ * Purpose: Add a new thought/idea to any of the four GAPS sections.
+ *
+ * Contracts (Types):
+ * - Request: ThoughtCreateRequest (content, section, optional metadata)
+ * - Response: ThoughtResponse { success: true, thought: ThoughtDto }
+ *   ThoughtDto fields: id, content, section, order (optional: tags, priority, status, aiGenerated, confidence, metadata, timestamps)
+ *
  * Data Flow:
- * 1. Frontend sends POST request with thought data
- * 2. API validates the request data
- * 3. Gets or creates default user/board (temporary until auth is implemented)
- * 4. Creates thought in database with auto-calculated position
- * 5. Returns the created thought with all metadata
- * 
- * Key Features:
- * - Automatic position calculation (appends to end of section)
- * - Full metadata support (tags, priority, status, AI flags)
- * - Error handling and validation
- * - Database transaction safety
+ * 1. Client sends POST with ThoughtCreateRequest
+ * 2. API validates and writes to DB
+ * 3. Returns ThoughtResponse with the created ThoughtDto
+ *
+ * Notes:
+ * - Position is auto-calculated per section on insert (mapped to order)
+ * - Single error surface: route returns { error } with status; the client wrapper converts non-OK results to ApiError
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createThought, getOrCreateDefaultUser, getOrCreateDefaultBoard } from '@/lib/database'
+import { logActivity } from '@/lib/activity'
+import type { ThoughtCreateRequest, ThoughtResponse } from '@/lib/types'
 
 /**
  * POST /api/thoughts - Add new thought
@@ -63,7 +64,7 @@ import { createThought, getOrCreateDefaultUser, getOrCreateDefaultBoard } from '
 export async function POST(request: NextRequest) {
   try {
     // Extract all possible fields from the request body
-    const { content, section, tags, priority, status, aiGenerated, confidence, metadata } = await request.json()
+    const { content, section, tags, priority, status, aiGenerated, confidence, metadata } = (await request.json()) as ThoughtCreateRequest
     
     console.log('🎯 POST /api/thoughts called with:', { content, section, tags, priority, status })
     
@@ -102,10 +103,21 @@ export async function POST(request: NextRequest) {
     })
     
     console.log('✅ Created new thought:', newThought.id)
+
+    // Centralized activity logging (create_thought)
+    await logActivity({
+      action: 'create_thought',
+      detail: `Created thought in ${section}`,
+      boardId: board.id,
+      userId: user.id,
+      entityType: 'thought',
+      entityId: newThought.id,
+      source: 'backend'
+    })
     
     // Return the created thought with all its metadata
     // Note: We map database field names to frontend field names for consistency
-    return NextResponse.json({
+    const payload: ThoughtResponse = {
       success: true,
       thought: {
         id: newThought.id,
@@ -127,7 +139,8 @@ export async function POST(request: NextRequest) {
         createdAt: newThought.createdAt,
         updatedAt: newThought.updatedAt
       }
-    })
+    }
+    return NextResponse.json< ThoughtResponse >(payload)
     
   } catch (error) {
     console.error('❌ Error creating thought:', error)

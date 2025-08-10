@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createThought } from '@/lib/database'
+import type { Section } from '@/lib/types'
 
 export async function POST(request: NextRequest) {
   try {
     const { boardId, thoughts } = await request.json()
     
     const createdThoughts = await Promise.all(
-      thoughts.map((thought: any) => 
+      (thoughts as Array<{ content: string; section: Section }>).map((thought) =>
         createThought({
           content: thought.content,
-          section: thought.section,   // Database and frontend both use 'section'
+          section: thought.section,
           boardId,
         })
       )

@@ -5,7 +5,7 @@
  * 
  * This file handles two main operations:
  * 1. GET requests - Return current diagram data (frontend asking "what's the current state?")
- * 2. PUT requests - Update diagram with new data (Chipp.ai saying "here's new data!")
+ * 2. PUT requests - Update diagram with new data (external/system or frontend save)
  * 
  * NEW FEATURES:
  * - ✅ Persistent database storage (data survives server restarts)
@@ -17,7 +17,7 @@
 // IMPORTS SECTION
 // ===============
 import { NextRequest, NextResponse } from 'next/server'
-import { GapsDiagram, GapsItem } from '@/lib/types'
+import { Section, DiagramApi } from '@/lib/types'
 import { 
   getUserByEmail, 
   createUser, 
@@ -28,9 +28,9 @@ import {
   createThought,
   updateThought,
   deleteThought,
-  logActivityToBoard,
   prisma
 } from '@/lib/database'
+import { logActivity } from '@/lib/activity'
 import bcrypt from 'bcryptjs'
 
 // =============================================================================
@@ -109,43 +109,51 @@ async function getOrCreateDefaultBoard(userId: number) {
  * ==============================
  * Converts our database board+thoughts into the API format your frontend expects.
  */
-function convertDatabaseToApiFormat(board: any): any {
+// Minimal DB board shape for conversion
+type DbThought = {
+  id: number
+  content: string
+  section: string
+  position: number | null
+  tags?: string[] | null
+  priority?: string | null
+  status?: string | null
+  aiGenerated: boolean
+  confidence?: number | null
+  metadata?: unknown
+  createdAt: string | Date
+  updatedAt: string | Date
+}
+
+type DbBoardForApi = {
+  id: number
+  title: string
+  thoughts: DbThought[]
+}
+
+function convertDatabaseToApiFormat(board: DbBoardForApi): DiagramApi {
   if (!board || !board.thoughts) {
-    return {
-      title: DEFAULT_BOARD_TITLE,
-      thoughts: []
-    }
+    return { id: 0, title: DEFAULT_BOARD_TITLE, thoughts: [] }
   }
 
-  // Convert thoughts to frontend GapsItem format with real database IDs and full metadata
   const thoughts = board.thoughts
-    .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
-    .map((t: any) => ({
-      id: t.id.toString(), // Convert database ID to string
+    .sort((a: DbThought, b: DbThought) => (a.position ?? 0) - (b.position ?? 0))
+    .map((t: DbThought) => ({
+      id: String(t.id),
       text: t.content,
-      section: t.section, // database section -> frontend section
-      order: t.position || 0,
-      
-      // Metadata and organization
-      tags: t.tags || [],
-      priority: t.priority,
-      status: t.status,
-      
-      // AI and collaboration
-      aiGenerated: t.aiGenerated || false,
-      confidence: t.confidence,
-      metadata: t.metadata,
-      
-      // Timestamps
+      section: t.section as Section,
+      order: t.position ?? 0,
+      tags: (t.tags ?? []) as string[],
+      priority: t.priority ?? undefined,
+      status: t.status ?? undefined,
+      aiGenerated: Boolean(t.aiGenerated),
+      confidence: t.confidence ?? undefined,
+      metadata: t.metadata as Record<string, unknown> | undefined,
       createdAt: t.createdAt,
-      updatedAt: t.updatedAt
+      updatedAt: t.updatedAt,
     }))
 
-  return {
-    id: board.id, // Add board ID to response
-    title: board.title,
-    thoughts: thoughts
-  }
+  return { id: board.id, title: board.title, thoughts }
 }
 
 // =============================================================================
@@ -178,7 +186,18 @@ export async function GET() {
     console.log('🔥 Loaded board:', board?.title, 'with', board?.thoughts?.length || 0, 'thoughts')
     
     // Convert database format to API format
-    const response = convertDatabaseToApiFormat(board)
+    if (!board) {
+      throw new Error('Board not found for user')
+    }
+    // Normalize tags to string[] for conversion (DB may return JSON)
+    const normalized = {
+      ...board,
+      thoughts: (board.thoughts || []).map((t: any) => ({
+        ...t,
+        tags: Array.isArray(t.tags) ? t.tags : (t.tags ? [] : []),
+      })),
+    } as unknown as DbBoardForApi
+    const response = convertDatabaseToApiFormat(normalized)
 
     console.log('🔥 Returning GET response:', JSON.stringify(response, null, 2))
     return NextResponse.json(response)
@@ -263,6 +282,15 @@ export async function PUT(request: NextRequest) {
     if (title.trim() && title.trim() !== board.title) {
       await updateBoard(board.id, { title: title.trim() })
       console.log('🔥 Updated board title to:', title.trim())
+      await logActivity({
+        action: 'update_title',
+        detail: `Title changed from "${board.title}" to "${title.trim()}" (bulk save)`,
+        boardId: board.id,
+        userId: user.id,
+        entityType: 'board',
+        entityId: board.id,
+        source: 'backend'
+      })
     }
 
     // DATABASE TRANSACTION: REPLACE ALL THOUGHTS
@@ -278,14 +306,20 @@ export async function PUT(request: NextRequest) {
       console.log('🔥 Deleted existing thoughts')
 
       // Create new thoughts for each section
-      const thoughtsToCreate: any[] = []
+      const thoughtsToCreate: Array<{
+        content: string
+        section: Section
+        boardId: number
+        position: number
+        aiGenerated: boolean
+      }> = []
 
       // Process each section
-      const sectionData = [
-        { array: status, section: 'status' },
-        { array: goal, section: 'goal' },
-        { array: analysis, section: 'analysis' },
-        { array: plan, section: 'plan' }
+      const sectionData: Array<{ array: string[]; section: Section }> = [
+        { array: status, section: 'status' as Section },
+        { array: goal, section: 'goal' as Section },
+        { array: analysis, section: 'analysis' as Section },
+        { array: plan, section: 'plan' as Section },
       ]
 
       for (const { array, section } of sectionData) {
@@ -314,17 +348,17 @@ export async function PUT(request: NextRequest) {
     // LOG THE ACTIVITY
     // ===============
     try {
-      await logActivityToBoard({
-        action: 'bulk_update',
+      await logActivity({
+        action: 'save_diagram',
         detail: `Updated diagram via API: ${title.trim() || 'Untitled'} (${status.length + goal.length + analysis.length + plan.length} total items)`,
         boardId: board.id,
         userId: user.id,
         entityType: 'board',
-        entityId: board.id
+        entityId: board.id,
+        source: 'backend'
       })
     } catch (logError) {
       console.warn('🔥 Failed to log activity:', logError)
-      // Don't fail the whole request if logging fails
     }
 
     // PREPARE SUCCESS RESPONSE

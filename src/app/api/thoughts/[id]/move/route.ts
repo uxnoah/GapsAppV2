@@ -1,30 +1,22 @@
 /**
  * THOUGHT MOVE OPERATION API ROUTE
  * ================================
- * This file handles HTTP requests for moving thoughts between sections
- * and reordering them within sections.
- * 
  * Endpoint: PATCH /api/thoughts/[id]/move
- * Purpose: Move a thought to a different section or position
- * 
- * URL Parameters:
- * - [id] - The database ID of the thought to move
- * 
- * Data Flow:
- * 1. Frontend sends PATCH request with target location
- * 2. API validates the move request
- * 3. Database automatically adjusts positions of all affected thoughts
- * 4. Returns the moved thought with updated position
- * 
- * Key Features:
- * - Automatic position rebalancing for all affected thoughts
- * - Support for both same-section reordering and cross-section moves
- * - Database transaction safety
- * - Maintains data integrity during complex operations
+ * Purpose: Move a thought to a different section or position.
+ *
+ * Contracts (Types):
+ * - Request: ThoughtMoveRequest
+ * - Response: ThoughtResponse { success: true, thought: ThoughtDto }
+ *
+ * Notes:
+ * - DB rebalances positions for impacted thoughts; we map DB position -> ThoughtDto.order
+ * - Single error surface: route returns { error } with status; the client wrapper converts non-OK results to ApiError
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { moveThought } from '@/lib/database'
+import { logActivity } from '@/lib/activity'
+import type { ThoughtMoveRequest, ThoughtResponse } from '@/lib/types'
 
 /**
  * PATCH /api/thoughts/[id]/move - Move thought and adjust other positions
@@ -76,7 +68,7 @@ export async function PATCH(
 ) {
   try {
     // Extract move parameters from request body
-    const { targetSection, targetIndex } = await request.json()
+    const { targetSection, targetIndex } = (await request.json()) as ThoughtMoveRequest
     const thoughtId = parseInt(params.id)
     
     console.log('🎯 PATCH /api/thoughts/' + thoughtId + '/move called with:', { 
@@ -100,10 +92,21 @@ export async function PATCH(
     const updatedThought = await moveThought(thoughtId, targetSection, targetIndex)
     
     console.log('✅ Moved thought:', thoughtId, 'to', targetSection, 'at index', targetIndex)
+
+    // Centralized activity logging (move_thought)
+    await logActivity({
+      action: 'move_thought',
+      detail: `Moved to ${targetSection} @ ${targetIndex}`,
+      boardId: updatedThought.boardId,
+      userId: undefined,
+      entityType: 'thought',
+      entityId: updatedThought.id,
+      source: 'backend'
+    })
     
     // Return the moved thought with all its metadata
     // Note: We map database field names to frontend field names for consistency
-    return NextResponse.json({
+    const payload: ThoughtResponse = {
       success: true,
       thought: {
         id: updatedThought.id,
@@ -125,7 +128,8 @@ export async function PATCH(
         createdAt: updatedThought.createdAt,
         updatedAt: updatedThought.updatedAt
       }
-    })
+    }
+    return NextResponse.json< ThoughtResponse >(payload)
     
   } catch (error) {
     console.error('❌ Error moving thought:', error)

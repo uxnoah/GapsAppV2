@@ -56,6 +56,81 @@ export interface GapsDiagram {
 // API REQUEST/RESPONSE TYPES - How we communicate with the server
 // =============================================================================
 
+// Convenience alias for API-facing section type
+export type Section = GapsSection
+
+// Shape of a thought in API responses
+export interface ThoughtApi {
+  id?: string
+  text?: string
+  section?: Section
+  order?: number
+  tags?: string[]
+  priority?: string
+  status?: string
+  aiGenerated?: boolean
+  confidence?: number
+  metadata?: Record<string, unknown>
+  createdAt?: string | Date
+  updatedAt?: string | Date
+}
+
+// Canonical API Thought payload (DTO) returned by thought endpoints
+export interface ThoughtDto {
+  id: number
+  content: string
+  section: Section
+  order: number
+  tags?: string[]
+  priority?: string
+  status?: string
+  aiGenerated?: boolean
+  confidence?: number
+  metadata?: Record<string, unknown>
+  createdAt?: string | Date
+  updatedAt?: string | Date
+}
+
+// Standard success envelope for thought endpoints
+export interface ThoughtResponse {
+  success: true
+  thought: ThoughtDto
+}
+
+// Requests for thought endpoints
+export interface ThoughtCreateRequest {
+  content: string
+  section: Section
+  tags?: string[]
+  priority?: string
+  status?: string
+  aiGenerated?: boolean
+  confidence?: number
+  metadata?: Record<string, unknown>
+}
+
+export interface ThoughtUpdateRequest {
+  content: string
+  tags?: string[]
+  priority?: string
+  status?: string
+  aiGenerated?: boolean
+  confidence?: number
+  metadata?: Record<string, unknown>
+}
+
+export interface ThoughtMoveRequest {
+  targetSection: Section
+  targetIndex: number
+}
+
+// Shape of the diagram in API responses
+export interface DiagramApi {
+  id: number
+  title: string
+  thoughts: ThoughtApi[]
+}
+
 /**
  * CREATE ITEM REQUEST
  * ===================

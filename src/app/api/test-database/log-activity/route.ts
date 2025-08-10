@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { logActivityToBoard } from '@/lib/database'
+import { createSessionAndLogActivity } from '@/lib/database'
 
 export async function POST(request: NextRequest) {
   try {
     const { boardId, userId, action, detail } = await request.json()
     
-    const activity = await logActivityToBoard({
+    const activity = await createSessionAndLogActivity({
       boardId,
       userId,
       action,

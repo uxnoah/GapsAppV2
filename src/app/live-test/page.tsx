@@ -8,7 +8,9 @@
  */
 
 import { useState, useEffect } from 'react'
+import type { DiagramApi, ThoughtApi } from '@/lib/types'
 import { GapsCanvas } from '@/components/gaps-canvas'
+import { api, routes, getApiErrorMessage } from '@/lib/api'
 
 interface DatabaseStats {
   users: number
@@ -73,26 +75,17 @@ export default function LiveTestPage() {
   const loadDatabaseState = async () => {
     try {
       // Get stats (silently, don't log this one)
-      const statsResponse = await fetch('/api/test-database/stats')
-      if (statsResponse.ok) {
-        const statsData = await statsResponse.json()
-        setStats(statsData.stats)
-      }
+      const statsData = await api.get<{ stats: DatabaseStats }>('/api/test-database/stats')
+      setStats(statsData.stats)
 
-      // Get current diagram state (silently)
-      const diagramResponse = await fetch('/api/diagram')
-      if (diagramResponse.ok) {
-        const diagramData = await diagramResponse.json()
-        
-        // Get the actual board from database using the same logic as diagram API
-        const boardResponse = await fetch('/api/test-database/current-board')
-        if (boardResponse.ok) {
-          const boardData = await boardResponse.json()
-          setCurrentBoard(boardData.board)
-        }
-      }
+      // Get current diagram state (silently) via API wrapper
+      await api.get<DiagramApi>(routes.diagram)
+
+      // Get the actual board from database using the same logic as diagram API
+      const boardData = await api.get<{ board: DatabaseBoard }>('/api/test-database/current-board')
+      setCurrentBoard(boardData.board)
     } catch (error) {
-      console.error('Error loading database state:', error)
+      console.error('Error loading database state:', getApiErrorMessage(error))
     }
   }
 
@@ -117,26 +110,14 @@ export default function LiveTestPage() {
   const addTestThought = async () => {
     try {
       addLog('Adding test thought...')
-      const response = await fetch('/api/test-database/create-thoughts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          boardId: currentBoard?.id || 1,
-          thoughts: [{
-            content: `Test thought ${Date.now()}`,
-            section: 'status'
-          }]
-        })
+      await api.post('/api/test-database/create-thoughts', {
+        boardId: currentBoard?.id || 1,
+        thoughts: [{ content: `Test thought ${Date.now()}`, section: 'status' }]
       })
-      
-      if (response.ok) {
-        addLog('✅ Test thought added successfully')
-        handleRefresh()
-      } else {
-        addLog('❌ Failed to add test thought')
-      }
+      addLog('✅ Test thought added successfully')
+      handleRefresh()
     } catch (error) {
-      addLog(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      addLog(`❌ Error: ${getApiErrorMessage(error)}`)
     }
   }
 
@@ -146,41 +127,28 @@ export default function LiveTestPage() {
       console.log('🚀 MANUAL SAVE TRIGGERED from Live Test page')
       
       // Get current state from the API
-      const response = await fetch('/api/diagram')
-      const currentData = await response.json()
+      const currentData: DiagramApi = await api.get(routes.diagram)
       
       // Convert from GET format { title, thoughts } to PUT format { title, status, goal, analysis, plan }
       const putData = {
         title: currentData.title,
-        status: currentData.thoughts?.filter((t: any) => t.section === 'status').map((t: any) => t.text) || [],
-        goal: currentData.thoughts?.filter((t: any) => t.section === 'goal').map((t: any) => t.text) || [],
-        analysis: currentData.thoughts?.filter((t: any) => t.section === 'analysis').map((t: any) => t.text) || [],
-        plan: currentData.thoughts?.filter((t: any) => t.section === 'plan').map((t: any) => t.text) || []
+        status: currentData.thoughts?.filter((t: ThoughtApi) => t.section === 'status').map((t: ThoughtApi) => t.text || '') || [],
+        goal: currentData.thoughts?.filter((t: ThoughtApi) => t.section === 'goal').map((t: ThoughtApi) => t.text || '') || [],
+        analysis: currentData.thoughts?.filter((t: ThoughtApi) => t.section === 'analysis').map((t: ThoughtApi) => t.text || '') || [],
+        plan: currentData.thoughts?.filter((t: ThoughtApi) => t.section === 'plan').map((t: ThoughtApi) => t.text || '') || []
       }
       
       const totalThoughts = putData.status.length + putData.goal.length + putData.analysis.length + putData.plan.length
       addLog(`📊 Retrieved ${totalThoughts} thoughts`)
       
       // Save it back (this tests the PUT endpoint)
-      const putResponse = await fetch('/api/diagram', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(putData)
-      })
-      
-      console.log('🚀 Save response status:', putResponse.status)
-      
-      if (putResponse.ok) {
-        addLog('✅ UI state successfully saved to database')
-        console.log('✅ Manual save completed successfully')
-        handleRefresh()
-      } else {
-        addLog(`❌ Failed to save UI state (${putResponse.status})`)
-        console.error('❌ Manual save failed:', putResponse.status)
-      }
+      await api.put(routes.diagram, putData)
+      addLog('✅ UI state successfully saved to database')
+      console.log('✅ Manual save completed successfully')
+      handleRefresh()
     } catch (error) {
-      addLog(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
-      console.error('❌ Manual save error:', error)
+      addLog(`❌ Error: ${getApiErrorMessage(error)}`)
+      console.error('❌ Manual save error:', getApiErrorMessage(error))
     }
   }
 
