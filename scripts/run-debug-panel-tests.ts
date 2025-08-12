@@ -1,8 +1,8 @@
 /**
  * Script: Run Debug Panel Tests
  * Calls the same API endpoints the UI debug panel uses, in roughly the same order.
+ * Uses global fetch available in Node 18+.
  */
-import fetch from 'node-fetch'
 
 async function main() {
   const base = process.env.BASE_URL || 'http://localhost:3000'

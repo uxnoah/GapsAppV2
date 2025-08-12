@@ -11,9 +11,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { requireSession } from '@/lib/auth'
 
 export async function POST(request: NextRequest) {
   try {
+    await requireSession()
     const body = await request.json()
     const { hasChanges = true, message = 'AI processing complete' } = body
 

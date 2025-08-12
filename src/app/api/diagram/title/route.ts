@@ -12,13 +12,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { Section, DiagramApi } from '@/lib/types'
-import { 
-  getOrCreateDefaultUser, 
-  getOrCreateDefaultBoard, 
-  getBoardById,
-  updateBoard
-} from '@/lib/database'
+import { getOrCreateUserBoard, getBoardById, updateBoard } from '@/lib/database'
 import { logActivity } from '@/lib/activity'
+import { requireSession } from '@/lib/auth'
 
 /**
  * CONVERT DATABASE TO API FORMAT
@@ -119,14 +115,9 @@ export async function PUT(request: NextRequest) {
       )
     }
 
-    // GET OR CREATE USER AND BOARD
-    // ============================
-    const user = await getOrCreateDefaultUser()
-    if (!user) {
-      throw new Error('Failed to get or create user')
-    }
-    
-    const board = await getOrCreateDefaultBoard(user.id)
+    // Require session; get or create board for this user
+    const session = await requireSession()
+    const board = await getOrCreateUserBoard(session.userId)
     if (!board) {
       throw new Error('Failed to get or create board')
     }
@@ -142,8 +133,8 @@ export async function PUT(request: NextRequest) {
       await logActivity({
         action: 'update_title',
         detail: `Title changed from "${board.title}" to "${trimmedTitle}"`,
-        boardId: board.id,
-        userId: user.id,
+          boardId: board.id,
+          userId: session.userId,
         entityType: 'board',
         entityId: board.id,
         source: 'backend'
@@ -157,7 +148,7 @@ export async function PUT(request: NextRequest) {
     // GET UPDATED BOARD DATA
     // ======================
     const updatedBoard = await getBoardById(board.id)
-    const response = convertDatabaseToApiFormat(updatedBoard)
+    const response = convertDatabaseToApiFormat(updatedBoard as any)
 
     // PREPARE SUCCESS RESPONSE
     // ========================

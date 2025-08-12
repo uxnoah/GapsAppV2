@@ -118,6 +118,7 @@ export async function createUser(data: {
   email: string
   passwordHash: string
   isAdmin?: boolean
+  authId?: string
 }) {
   return await prisma.user.create({
     data: {
@@ -125,6 +126,7 @@ export async function createUser(data: {
       email: data.email,
       passwordHash: data.passwordHash,
       isAdmin: data.isAdmin || false,
+      authId: data.authId ?? undefined,
     },
   })
 }
@@ -137,6 +139,15 @@ export async function getUserByEmail(
   return await prisma.user.findUnique({
     where: { email },
     include: options?.includeBoards ? { boards: true } : undefined,
+  })
+}
+
+/** Set authId for a user (used to link Supabase auth.uid() to our users row). */
+export async function setUserAuthIdByEmail(email: string, authId: string) {
+  return await prisma.user.update({
+    where: { email },
+    data: { authId },
+    select: { id: true, authId: true },
   })
 }
 
@@ -161,11 +172,15 @@ export async function updateUser(id: number, data: {
   email?: string
   displayName?: string
   avatarUrl?: string
-  preferences?: Prisma.JsonValue
+  preferences?: Prisma.JsonValue | null
 }) {
   return await prisma.user.update({
     where: { id },
-    data,
+    data: {
+      ...data,
+      // Prisma expects NullableJsonNullValueInput | InputJsonValue; coerce undefined/null properly
+      preferences: (data.preferences as any) ?? undefined,
+    },
     select: { 
       id: true, 
       username: true, 
@@ -293,6 +308,53 @@ export async function deleteBoard(id: number, userId: number): Promise<void> {
   })
 }
 
+/**
+ * Return the user's most recently updated board, or create a new blank one.
+ * Replaces demo-time bootstrapping and works under RLS.
+ */
+export async function getOrCreateUserBoard(userId: number): Promise<BoardWithRelations> {
+  // Try to respect user's preferred current board if set in preferences
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { preferences: true } })
+    const prefs = (user?.preferences as any) || {}
+    const currentBoardId = typeof prefs?.currentBoardId === 'number' ? prefs.currentBoardId : undefined
+    if (currentBoardId) {
+      const byPref = await getBoardById(currentBoardId, userId)
+      if (byPref) return byPref
+    }
+  } catch {
+    // ignore preference read errors; fall back to most recent board
+  }
+
+  const boards = await getUserBoards(userId)
+  if (boards.length === 0) {
+    const created = await createBoard({ title: 'My GAPS Diagram', userId })
+    const full = await getBoardById(created.id)
+    if (!full) {
+      throw new Error('Failed to create initial board')
+    }
+    return full
+  }
+  const latestId = boards[0].id
+  const full = await getBoardById(latestId)
+  if (!full) {
+    throw new Error('Board not found for user')
+  }
+  return full
+}
+
+/** Set user's current board preference so future loads open the selected board. */
+export async function setCurrentBoardForUser(userId: number, boardId: number): Promise<void> {
+  // Ensure board belongs to user
+  const owned = await prisma.board.findFirst({ where: { id: boardId, userId }, select: { id: true } })
+  if (!owned) throw new Error('Board not found or not owned by user')
+  // Merge preferences.currentBoardId
+  const existing = await prisma.user.findUnique({ where: { id: userId }, select: { preferences: true } })
+  const prefs = (existing?.preferences as any) || {}
+  prefs.currentBoardId = boardId
+  await prisma.user.update({ where: { id: userId }, data: { preferences: prefs as any } })
+}
+
 // Thought Management
 /** Create a thought; if order not provided, auto-assign next position in section. */
 export async function createThought(data: {
@@ -330,8 +392,8 @@ export async function createThought(data: {
       priority: data.priority,
       status: data.status,
       aiGenerated: data.aiGenerated || false,
-      confidence: data.confidence,
-      metadata: data.metadata,
+      confidence: data.confidence ?? undefined,
+      metadata: (data.metadata as any) ?? undefined,
     },
   })
 }
@@ -346,11 +408,15 @@ export async function updateThought(id: number, data: {
   status?: string
   aiGenerated?: boolean
   confidence?: number
-  metadata?: Prisma.JsonValue
+  metadata?: Prisma.JsonValue | null
 }) {
   return await prisma.thought.update({
     where: { id },
-    data,
+    data: {
+      ...data,
+      confidence: data.confidence ?? undefined,
+      metadata: (data.metadata as any) ?? undefined,
+    },
   })
 }
 
@@ -633,64 +699,7 @@ export async function disconnectDatabase() {
 }
 
 
-// NOTE [section below will need to be updated when we add authentication.]
-
-// DEFAULT USER HELPERS (before authentication is implemented)
-const DEFAULT_USER_EMAIL = 'demo@chapp.local'
-const DEFAULT_BOARD_TITLE = 'My GAPS Diagram'
-
-/** Demo helper: ensure a default user exists (temporary before auth). */
-export async function getOrCreateDefaultUser() {
-  try {
-    // Try to find existing default user
-    let user = await getUserByEmail(DEFAULT_USER_EMAIL)
-    
-    if (!user) {
-      console.log('🏗️ Creating default user for demo')
-      // Create default user
-      const bcrypt = await import('bcryptjs')
-      const hashedPassword = await bcrypt.hash('demo-password', 10)
-      const newUser = await createUser({
-        username: 'demo-user',
-        email: DEFAULT_USER_EMAIL,
-        passwordHash: hashedPassword,
-        isAdmin: false
-      })
-      user = await getUserByEmail(DEFAULT_USER_EMAIL)
-    }
-    
-    return user
-  } catch (error) {
-    console.error('Error with default user:', error)
-    throw error
-  }
-}
-
-// 📝 NOTE: [This function creates a default board for new users so they don't start with an empty app. Used for better UX.]
-
-/** Demo helper: ensure a default board exists for a user (temporary before auth). */
-export async function getOrCreateDefaultBoard(userId: number) {
-  try {
-    // Get user's boards
-    const boards = await getUserBoards(userId)
-    
-    if (boards.length === 0) {
-      console.log('🏗️ Creating default board for user')
-      // Create default board
-      return await createBoard({
-        title: DEFAULT_BOARD_TITLE,
-        userId: userId,
-        description: 'Default GAPS diagram board'
-      })
-    }
-    
-    // Return the first board (most recently updated)
-    return await getBoardById(boards[0].id)
-  } catch (error) {
-    console.error('Error with default board:', error)
-    throw error
-  }
-} 
+// Deprecated demo helpers removed after auth+RLS rollout.
 
 // =============================================================================
 // CONVERSATION MANAGEMENT FUNCTIONS
@@ -745,7 +754,7 @@ export async function addMessage(data: {
   content: string
   model?: string
   tokens?: number
-  metadata?: Prisma.JsonValue
+  metadata?: Prisma.JsonValue | null
 }) {
   // Get current message count for sequence number
   const conversation = await prisma.conversation.findUnique({
@@ -767,7 +776,7 @@ export async function addMessage(data: {
         sequenceNumber: conversation.messageCount,
         model: data.model,
         tokens: data.tokens,
-        metadata: data.metadata,
+        metadata: (data.metadata as any) ?? undefined,
       },
     })
     

@@ -1,64 +1,60 @@
-# Task List
+image.png# Task List
 
 ## Breadcrumb (top)
-- Next step I will take next turn is: Collect Supabase credentials and project settings to enable DB/Auth integration work.
+- Next step I will take next turn is: Draft AI brain I/O schema v0 (envelopes + ops) and stub apply-ops endpoint [D6].
 
 ## Conventions
 - Rule: Number all tasks in `Next`; maintain numbering when editing.
 - Rule: When a Now task/subtask is completed, move it to Done in the same turn; update Breadcrumb with the immediate next step.
+- Rule: For any non-trivial task in Now/Next, append a detail footnote like `[D1]` and document the context/success criteria in "Task Details" at the bottom. Link out to docs when useful.
+- Rule: Use ⭐ to mark strong candidates to pick up next.
 
 ## Now
-2. Workspace launcher
-   - 2.1 Add `scripts/mcp-start.sh` to reliably start Browser Tools server
-   - 2.2 Add `scripts/dev-all.sh` and `npm run dev:all`
-   - 2.3 Add quick doc `docs/browser-mcp.md` and link from README later
-
-3. Supabase prerequisites — credentials & settings (blocking)
-   - What to provide (values) → where to get them
-     - NEXT_PUBLIC_SUPABASE_URL → Supabase: Project Settings → API → Project URL
-     - NEXT_PUBLIC_SUPABASE_ANON_KEY → Supabase: Project Settings → API → anon public key
-     - SUPABASE_SERVICE_ROLE_KEY → Supabase: Project Settings → API → service_role key
-     - SUPABASE_JWT_SECRET → Supabase: Project Settings → API → JWT secret
-     - DATABASE_URL (pooled) → Supabase: Database → Connection string → URI (use pgbouncer, port 6543)
-     - DIRECT_URL (non-pooled) → Supabase: Database → Connection string → URI (direct, port 5432)
-     - SHADOW_DATABASE_URL (optional) → Direct URL to a separate scratch DB (or we can reuse direct URL if needed)
-     - SITE URL(s) → Supabase: Authentication → URL Configuration → Site URL (add `http://localhost:3000` and your prod domain)
-     - ALLOWED REDIRECT URLs → Supabase: Authentication → URL Configuration → Redirect URLs (add local + prod)
-     - GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET → Google Cloud Console: APIs & Services → Credentials → OAuth 2.0 Client IDs (redirect: `https://<project-ref>.supabase.co/auth/v1/callback`)
-     - GITHUB_OAUTH_CLIENT_ID / GITHUB_OAUTH_CLIENT_SECRET → GitHub → Settings → Developer settings → OAuth Apps (callback: `https://<project-ref>.supabase.co/auth/v1/callback`)
-     - INITIAL_ADMIN_EMAILS → Your list of emails to mark `is_admin = true`
-
-   - How to set up providers
-     - Google: Google Cloud Console → select/create project → OAuth consent screen (External) → publish app → Credentials → Create OAuth client ID (Web) → Authorized redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback` → copy client ID/secret
-     - GitHub: GitHub → Settings → Developer settings → OAuth Apps → New OAuth App → Homepage URL: your Site URL; Authorization callback URL: `https://<project-ref>.supabase.co/auth/v1/callback` → Register → copy client ID/secret
-
-   - Supabase config touchpoints
-     - Project Settings → API: copy URL/keys/secrets above
-     - Authentication → Providers: enable Google and GitHub, paste client IDs/secrets
-     - Authentication → URL Configuration: set Site URL and Redirect URLs (local + prod)
-     - Database → Connection string: copy pooled (DATABASE_URL) and direct (DIRECT_URL)
-
-   - Notes
-     - Single Supabase project for now (we can clone to staging later)
-     - No SMTP needed since we’re using Google/GitHub SSO
-     - Share secrets securely; do not commit to git
+1. Realtime polish (keep optional items only)
+   - [ ] Add small reconnect/backoff if channel closes (optional)
 
 ## Next
-1. Quick wins before Supabase integration (1–2 hours)
-   1.1 (DONE) Add a tiny API client wrapper for fetch (single place to change routes/options)
-   1.2 Ensure request/response types where still missing in thought endpoints
-   1.3 Refresh stale comments
-   1.4 Add a smoke test checklist for diagram load/save and thought CRUD/move
-   1.5 (DONE) Centralize activity logging usage (one helper used in routes)
+1. AI brain I/O schema v0 ⭐
+   - Define outbound envelope (conversation + compact diagram + board/version) [D6]
+   - Define inbound updates (domain ops + optional replace_document) [D6]
+   - Add batch apply endpoint `/api/boards/[id]/apply-ops` (atomic, idempotent) [D6]
+   - Prefer server-applied changes + realtime UI updates; skip optimistic initially [D6]
+   - LangFlow: tool schema for `submit_diagram_updates` + prompt wiring [D6]
 
-2. Supabase integration (DB + Auth + RLS + Realtime)
-   2.1 Create Supabase project; enable Postgres (auto)
-   2.2 Add env vars: `DATABASE_URL` (Supabase), `SHADOW_DATABASE_URL` (optional for Prisma), Supabase auth keys
-   2.3 Prisma: switch `datasource db` provider to `postgres`; `prisma migrate deploy`
-   2.4 Replace default user helpers with Supabase Auth session in API routes
-   2.5 Define RLS policies (per-user access to boards/thoughts)
-   2.6 Frontend: add Supabase client; subscribe to Realtime on `thoughts` (and boards if needed)
-   2.7 Keep Prisma for server-side reads/writes; use Supabase client for Auth + Realtime
+## Plan: Supabase rollout (Auth first, then DB)
+
+1) Auth (Google/GitHub)
+   - [x] Confirm `.env.local` has NEXT_PUBLIC_SUPABASE_URL/ANON and URLs configured in Supabase
+   - [x] `/login` (client) with Google/GitHub; fallback handles implicit hash tokens
+   - [x] Server helpers: read session on API routes; block if no session
+   - [x] Remove default demo bootstrap (`getOrCreateDefaultUser/Board`) after RLS
+   - [x] Checkpoint: Sign in sets server cookie; UI loads diagram
+
+2) Database swap to Supabase Postgres
+   - [x] Update `prisma/schema.prisma` provider to `postgresql` with `directUrl`
+   - [x] Ensure `.env.local` has DATABASE_URL (pooled), DIRECT_URL, SHADOW_DATABASE_URL
+   - [x] Run `npm run db:push && npx prisma generate`
+   - [x] Checkpoint: Tables visible in Supabase → Database → Tables
+
+3) RLS policies
+    - [x] Enable RLS on `boards`, `thoughts`, `work_sessions`, `activity_logs`
+    - [x] Policies: owner-only read/write via `auth.uid()` mapping (link Supabase auth user to our `users` row) and admin bypass
+    - [ ] Seed admin emails as `is_admin = true`
+    - [x] Checkpoint: Unauthed blocked; authed owner OK
+
+4) Realtime (optional milestone)
+   - [x] Subscribe to `thoughts` changes on client; merge updates in `gaps-canvas`
+   - [x] Checkpoint: Second browser receives inserts/moves/edits live (intermittent UI state issues noted)
+
+5) Cleanup
+   - [x] Remove test-database routes and demo code
+   - [x] Update docs/ENVIRONMENT.md with final steps
+
+## New issues / Tech debt
+- Realtime misses under rapid local edits/moves (state mgmt) → address with state refactor later
+- Console error fixes were implemented; keep watch during dev hot reload
+- Suppress build warnings from `@supabase/realtime-js` dynamic import (optional)
+- Add runtime health banner for auth in dev (optional)
 
 3. Vector store (knowledge base)
    3.1 Enable `pgvector` on Supabase; create embedding column(s) and index
@@ -66,6 +62,9 @@
    3.3 Add minimal search endpoint using cosine distance
 
 ## Later/Backlog
+- Front-end polish (deferred from Now)
+  - Fix "new thought" flicker when adding another item immediately after typing [D3]
+  - Fix section snap-back when pressing Load (queue-by-id + reconcile) [D3]
 - TypeScript Infrastructure & Code Quality
   - Define proper interfaces for API request/response formats
   - Implement proper error handling at the source instead of catching everywhere
@@ -111,13 +110,46 @@
   - Remove unused CreateItemRequest; update object structure changes in utils; add Sandbox to utils section list
 
 ## Done
+ - RLS prep
+  - Realtime MVP
+    - Server session endpoint added; browser websocket authenticated
+    - Insert echo ignored and id dedupe added in `gaps-canvas`
+    - Cross-tab updates working for add/move/edit/delete; minor gaps remain due to local state
+
+  - Settings persistence MVP
+    - Added `GET/PUT /api/users/preferences` storing generic JSON in `users.preferences`
+    - Wired Settings page toggles/select to read/write (`openLastDiagram`, `enableRealtime`, `experienceLevel`)
+
+  - Sign-in UX
+    - Removed GitHub button; kept Google OAuth
+    - Added email magic-link and email/password sign-up/sign-in flows
+   - Ran auth_id backfill in Supabase SQL editor
+   - Noted one leftover user without auth_id: `demo@chapp.local` (will clean up before enabling RLS)
+ - RLS enabled + policies created (owner-only + admin bypass) on `boards`, `thoughts`, `work_sessions`, `activity_logs`
+ - RLS verification
+   - Incognito GET `/api/diagram` → 401/403 Unauthorized
+   - Logged-in GET `/api/diagram` → OK; app loads and CRUD works with minor perf issues to tune
+- Cross-user verification: isolated per user OK; admin toggle optional (see [D1])
+- Login UX
+  - Client-only login component; server `/login` redirect if already authed
+  - Fallback for implicit hash tokens → server cookie via `/api/auth/set-session`
+  - `/` redirects unauthenticated users to `/login`
+
+- Header navigation
+  - Added Canvas/Menu/Settings links in header
+
+- Menu & settings UX
+  - "Items" label changed to "thoughts" on list
+  - Create New moved to bottom as a single button; creates board, selects, and navigates to canvas
+  - Settings page: added Placeholder section with toggles and dropdowns (no persistence yet)
+
 - Swapped first call site to wrapper: `src/app/live-test/page.tsx` GET `/api/diagram`.
 - Created and commented API wrapper `src/lib/api.ts` (routes, apiFetch, ApiError, helpers).
 - Replaced fetch with wrapper in `gaps-canvas.tsx` for: load, save, title update sim, add/edit/delete/move, AI sims; removed response-branches; fixed type-safe mapping.
 - Unified catch blocks to use `getApiErrorMessage`.
 - Converted remaining live-test page calls to wrapper.
 - Added optional GET retry policy hook (off by default) in wrapper.
-- 1.4: Smoke tests
+ - 1.4: Smoke tests
   - 1.4.1: Created `docs/smoke-tests.md` with end-to-end steps
   - 1.4.2: Added “✅ Diagram loaded (items: N)” success log; existing success logs confirm add/edit/move/delete/title/save
   - 1.4.3: Ran checklist via Debug Panel and `/live-test` (user confirmed logs); no blocking gaps found
@@ -129,6 +161,7 @@
 - Removed temporary sub-task doc (was `docs/tasks/typing-and-db-consistency.md`)
 
 - Workspace launcher MVP: added `scripts/mcp-start.sh`, `scripts/dev-all.sh`, `npm run mcp:start`, `npm run dev:all`, and `docs/browser-mcp.md`. Confirmed the MCP server start script runs the server in background and writes logs.
+ - Added `docs/QuickLaunch` with one-line commands to start Next.js at `http://localhost:3000` and the Browser Tools MCP server (default or `--port 3025`).
 
 - 1.5: Centralized activity logging
   - 1.5.1: Created `src/lib/activity.ts` with strongly-typed `ActivityAction` union and `logActivity`
@@ -136,3 +169,27 @@
   - 1.5.3: Verified logs visible in terminal with `ACTIVITY_LOG_DEBUG=true`; deduped extra save_diagram log
 
 
+## Task Details
+
+[D1] Seed admin + verify bypass
+- Why: Admins must access all rows via RLS bypass for support/debug.
+- Steps: see `docs/optional-tasks.md` (SQL and UI paths)
+- Success: Query confirms `is_admin=true`; as admin you can read any board; non-admins remain isolated.
+
+[D2] Update docs/ENVIRONMENT.md (auth/RLS finalization)
+- Include: RLS summary, how to toggle admin, how to verify isolation/admin access, testing steps (incognito vs authed), and rollback notes.
+- Success: New section exists; steps are reproducible without chat history.
+
+[D3] Front-end polish: new-thought flicker & Load snap-back
+- Context: Flicker when adding another thought immediately; occasional cross-section snap-back after manual Load.
+- Approach: Buffer unsaved edits per-id; only rehydrate from GET when newer server version; queue-by-id for move saves; debounce manual Load reconciliation.
+- Success: No visual flash when adding back-to-back; no cross-section regressions on Load.
+
+[D4] User menu, list, preferences
+- Scope: Add a lightweight menu; route for listing user boards; button to create new; placeholder Preferences page (open last vs new, etc.).
+- Success: From header, user can navigate to list, open board, create new; preferences page renders.
+
+[D5] Supabase rollout cleanup
+- Remove test/demo endpoints and `/test-database` page now that RLS + auth flow is stable.
+- Quick audit that all app routes call `requireSession()` at the top.
+- Re-run RLS/Auth verification (see [D2]) to ensure no regressions.

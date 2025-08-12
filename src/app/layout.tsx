@@ -18,6 +18,7 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 // Import our global CSS styles that apply to the entire app
 import './globals.css'
+import AppHeader from '@/components/app-header'
 
 // FONT CONFIGURATION
 // ==================
@@ -60,6 +61,7 @@ export default function RootLayout({
         {/* - 'min-h-screen' = at least full screen height */}
         {/* - 'bg-background' and 'text-foreground' = theme colors */}
         <main className="min-h-screen bg-background text-foreground">
+          <AppHeader />
           {/* INSERT PAGE CONTENT HERE */}
           {/* ======================== */}
           {/* Whatever page the user visits gets inserted in this spot */}

@@ -19,90 +19,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Section, DiagramApi } from '@/lib/types'
 import { 
-  getUserByEmail, 
-  createUser, 
-  getUserBoards, 
-  createBoard, 
   getBoardById,
   updateBoard,
   createThought,
   updateThought,
   deleteThought,
-  prisma
+  prisma,
+  getOrCreateUserBoard
 } from '@/lib/database'
 import { logActivity } from '@/lib/activity'
-import bcrypt from 'bcryptjs'
+import { requireSession } from '@/lib/auth'
 
 // =============================================================================
 // DATABASE INTEGRATION
 // =============================================================================
-
-/**
- * DEFAULT USER SETUP (TEMPORARY - BEFORE AUTHENTICATION)
- * ======================================================
- * For now, we'll create a default user so the app works without login.
- * Later, this will be replaced with proper authentication.
- */
-const DEFAULT_USER_EMAIL = 'demo@chapp.local'
 const DEFAULT_BOARD_TITLE = 'My GAPS Diagram'
 
-/**
- * GET OR CREATE DEFAULT USER
- * ==========================
- * Ensures we have a default user to work with before authentication is added.
- */
-async function getOrCreateDefaultUser() {
-  try {
-    // Try to find existing default user
-    let user = await getUserByEmail(DEFAULT_USER_EMAIL)
-    
-    if (!user) {
-      console.log('🏗️ Creating default user for demo')
-      // Create default user
-      const hashedPassword = await bcrypt.hash('demo-password', 10)
-      const newUser = await createUser({
-        username: 'demo-user',
-        email: DEFAULT_USER_EMAIL,
-        passwordHash: hashedPassword,
-        isAdmin: false
-      })
-      user = await getUserByEmail(DEFAULT_USER_EMAIL)
-    }
-    
-    return user
-  } catch (error) {
-    console.error('Error with default user:', error)
-    throw error
-  }
-}
-
-/**
- * GET OR CREATE DEFAULT BOARD
- * ===========================
- * Ensures the default user has a board to work with.
- */
-async function getOrCreateDefaultBoard(userId: number) {
-  try {
-    // Get user's boards
-    const boards = await getUserBoards(userId)
-    
-    if (boards.length === 0) {
-      console.log('🏗️ Creating default board for user')
-      // Create default board
-      return await createBoard({
-        title: DEFAULT_BOARD_TITLE,
-        userId: userId,
-        description: 'Default GAPS diagram board'
-      })
-    }
-    
-    // Return the first board (most recently updated)
-    return await getBoardById(boards[0].id)
-  } catch (error) {
-    console.error('Error with default board:', error)
-    throw error
-  }
-}
+// Demo bootstrapping removed; we now rely on authenticated session and per-user boards.
 
 /**
  * CONVERT DATABASE TO API FORMAT
@@ -175,13 +108,8 @@ function convertDatabaseToApiFormat(board: DbBoardForApi): DiagramApi {
 export async function GET() {
   try {
     console.log('🔥 GET /api/diagram called at:', new Date().toISOString())
-    
-    // Get or create default user and board
-    const user = await getOrCreateDefaultUser()
-    if (!user) {
-      throw new Error('Failed to get or create user')
-    }
-    const board = await getOrCreateDefaultBoard(user.id)
+    const session = await requireSession()
+    const board = await getOrCreateUserBoard(session.userId)
     
     console.log('🔥 Loaded board:', board?.title, 'with', board?.thoughts?.length || 0, 'thoughts')
     
@@ -203,9 +131,10 @@ export async function GET() {
     return NextResponse.json(response)
   } catch (error) {
     console.error('🔥 Error fetching diagram:', error)
+    const status = (error as any)?.status || 500
     return NextResponse.json(
       { error: 'Failed to fetch diagram', details: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
+      { status }
     )
   }
 }
@@ -265,13 +194,8 @@ export async function PUT(request: NextRequest) {
     console.log('  - analysis:', analysis.length, 'items')
     console.log('  - plan:', plan.length, 'items')
 
-    // GET OR CREATE USER AND BOARD
-    // ============================
-    const user = await getOrCreateDefaultUser()
-    if (!user) {
-      throw new Error('Failed to get or create user')
-    }
-    const board = await getOrCreateDefaultBoard(user.id)
+    const session = await requireSession()
+    const board = await getOrCreateUserBoard(session.userId)
     
     if (!board) {
       throw new Error('Failed to get or create board')
@@ -286,7 +210,7 @@ export async function PUT(request: NextRequest) {
         action: 'update_title',
         detail: `Title changed from "${board.title}" to "${title.trim()}" (bulk save)`,
         boardId: board.id,
-        userId: user.id,
+        userId: session.userId,
         entityType: 'board',
         entityId: board.id,
         source: 'backend'
@@ -352,7 +276,7 @@ export async function PUT(request: NextRequest) {
         action: 'save_diagram',
         detail: `Updated diagram via API: ${title.trim() || 'Untitled'} (${status.length + goal.length + analysis.length + plan.length} total items)`,
         boardId: board.id,
-        userId: user.id,
+        userId: session.userId,
         entityType: 'board',
         entityId: board.id,
         source: 'backend'
@@ -380,12 +304,13 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json(response)
   } catch (error) {
     console.error('🔥 ERROR updating diagram:', error)
+    const status = (error as any)?.status || 500
     return NextResponse.json(
       { 
         error: 'Failed to update diagram', 
         details: error instanceof Error ? error.message : 'Unknown error'
       },
-      { status: 500 }
+      { status }
     )
   }
 } 

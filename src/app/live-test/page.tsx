@@ -54,9 +54,7 @@ export default function LiveTestPage() {
       
       // Only log non-polling API calls
       if (typeof url === 'string' && url.includes('/api/') && 
-          !url.includes('/api/test-database/stats') && 
-          !url.includes('/api/test-database/get-board') &&
-          !url.includes('/api/test-database/current-board') &&
+          !url.includes('/api/dev-tools/stats') && 
           method !== 'GET') {
         callCount++
         addLog(`${method} ${url} (#${callCount})`)
@@ -75,15 +73,14 @@ export default function LiveTestPage() {
   const loadDatabaseState = async () => {
     try {
       // Get stats (silently, don't log this one)
-      const statsData = await api.get<{ stats: DatabaseStats }>('/api/test-database/stats')
+      const statsData = await api.get<{ stats: DatabaseStats }>(routes.stats)
       setStats(statsData.stats)
 
       // Get current diagram state (silently) via API wrapper
       await api.get<DiagramApi>(routes.diagram)
 
       // Get the actual board from database using the same logic as diagram API
-      const boardData = await api.get<{ board: DatabaseBoard }>('/api/test-database/current-board')
-      setCurrentBoard(boardData.board)
+      setCurrentBoard(null) // removed old current-board dev endpoint
     } catch (error) {
       console.error('Error loading database state:', getApiErrorMessage(error))
     }
@@ -110,10 +107,8 @@ export default function LiveTestPage() {
   const addTestThought = async () => {
     try {
       addLog('Adding test thought...')
-      await api.post('/api/test-database/create-thoughts', {
-        boardId: currentBoard?.id || 1,
-        thoughts: [{ content: `Test thought ${Date.now()}`, section: 'status' }]
-      })
+      // Use real add endpoint as demo
+      await api.post(routes.thoughts, { content: `Test thought ${Date.now()}`, section: 'status' })
       addLog('✅ Test thought added successfully')
       handleRefresh()
     } catch (error) {

@@ -12,6 +12,8 @@
 // This line imports our main GAPS diagram component from the components folder
 // The '@/' is a shortcut that points to the 'src' folder
 import { GapsCanvas } from '@/components/gaps-canvas'
+import { getServerSupabase } from '@/lib/supabase-server'
+import { redirect } from 'next/navigation'
 
 /**
  * HOME COMPONENT FUNCTION
@@ -19,7 +21,12 @@ import { GapsCanvas } from '@/components/gaps-canvas'
  * This is the main function that defines what appears on the homepage.
  * The 'export default' means this is the main thing this file provides to other files.
  */
-export default function Home() {
+export default async function Home() {
+  const supabase = getServerSupabase()
+  const { data } = await supabase.auth.getUser()
+  if (!data?.user) {
+    redirect('/login')
+  }
   // This 'return' statement defines the HTML structure that gets displayed
   return (
     // MAIN CONTAINER

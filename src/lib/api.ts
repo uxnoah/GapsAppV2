@@ -55,7 +55,7 @@ export const routes = {
   /** Move a single thought (drag-and-drop) */
   thoughtMove: (id: string | number) => `/api/thoughts/${id}/move`,
   /** Dev/test-only: load stats for debug panel */
-  stats: '/api/test-database/stats',
+  stats: '/api/dev-tools/stats',
 } as const
 
 export class ApiError extends Error {

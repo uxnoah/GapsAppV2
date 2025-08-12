@@ -20,9 +20,10 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createThought, getOrCreateDefaultUser, getOrCreateDefaultBoard } from '@/lib/database'
+import { createThought, getOrCreateUserBoard } from '@/lib/database'
 import { logActivity } from '@/lib/activity'
-import type { ThoughtCreateRequest, ThoughtResponse } from '@/lib/types'
+import type { ThoughtCreateRequest, ThoughtResponse, Section } from '@/lib/types'
+import { requireSession } from '@/lib/auth'
 
 /**
  * POST /api/thoughts - Add new thought
@@ -68,21 +69,17 @@ export async function POST(request: NextRequest) {
     
     console.log('🎯 POST /api/thoughts called with:', { content, section, tags, priority, status })
     
-    // Validate required fields
-    if (!content || !section) {
+    // Validate required fields (allow empty content)
+    if (section === undefined || section === null || section === '') {
       return NextResponse.json(
-        { error: 'Content and section are required' },
+        { error: 'Section is required' },
         { status: 400 }
       )
     }
     
-    // TEMPORARY: Get default user and board (before authentication is implemented)
-    // In production, this would get the authenticated user from the session
-    const user = await getOrCreateDefaultUser()
-    if (!user) {
-      throw new Error('Failed to get or create user')
-    }
-    const board = await getOrCreateDefaultBoard(user.id)
+    // Require an authenticated session and board
+    const session = await requireSession()
+    const board = await getOrCreateUserBoard(session.userId)
     if (!board) {
       throw new Error('Failed to get or create board')
     }
@@ -90,7 +87,7 @@ export async function POST(request: NextRequest) {
     // Create the thought in the database
     // Note: order is undefined, so createThought will auto-calculate the next position
     const newThought = await createThought({
-      content,                    // The actual text content
+      content: content ?? '',     // Allow empty content
       section,                    // Which GAPS section (status/goal/analysis/plan)
       boardId: board.id,          // Which board this thought belongs to
       // order: undefined,        // Let createThought calculate the next position automatically
@@ -99,7 +96,7 @@ export async function POST(request: NextRequest) {
       status: status || 'pending', // Default to 'pending' if not specified
       aiGenerated: aiGenerated || false, // Whether AI generated this thought
       confidence,                 // AI confidence score (0.0 to 1.0)
-      metadata: metadata || {}    // Additional metadata object
+      metadata: (metadata as any) // Additional metadata object
     })
     
     console.log('✅ Created new thought:', newThought.id)
@@ -109,7 +106,7 @@ export async function POST(request: NextRequest) {
       action: 'create_thought',
       detail: `Created thought in ${section}`,
       boardId: board.id,
-      userId: user.id,
+      userId: session.userId,
       entityType: 'thought',
       entityId: newThought.id,
       source: 'backend'
@@ -122,18 +119,18 @@ export async function POST(request: NextRequest) {
       thought: {
         id: newThought.id,
         content: newThought.content,      // API uses 'content' (database field)
-        section: newThought.section,      // Database and frontend both use 'section'
+        section: newThought.section as Section,      // Normalize to Section type
         order: newThought.position || 0,  // Map database 'position' -> frontend 'order'
         
         // Metadata and organization fields
-        tags: newThought.tags || [],
-        priority: newThought.priority,
-        status: newThought.status,
+        tags: Array.isArray(newThought.tags) ? (newThought.tags as string[]) : [],
+        priority: newThought.priority ?? undefined,
+        status: newThought.status ?? undefined,
         
         // AI and collaboration fields
         aiGenerated: newThought.aiGenerated || false,
-        confidence: newThought.confidence,
-        metadata: newThought.metadata,
+        confidence: newThought.confidence ?? undefined,
+        metadata: (newThought.metadata as unknown as Record<string, unknown>) ?? undefined,
         
         // Timestamps
         createdAt: newThought.createdAt,

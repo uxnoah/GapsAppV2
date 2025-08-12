@@ -17,8 +17,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { updateThought, deleteThought } from '@/lib/database'
+import { requireSession } from '@/lib/auth'
 import { logActivity } from '@/lib/activity'
-import type { ThoughtUpdateRequest, ThoughtResponse } from '@/lib/types'
+import type { ThoughtUpdateRequest, ThoughtResponse, Section } from '@/lib/types'
 
 /**
  * PUT /api/thoughts/[id] - Edit thought content and metadata
@@ -62,29 +63,24 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
+    await requireSession()
     // Extract all possible fields from the request body
     const { content, tags, priority, status, aiGenerated, confidence, metadata } = (await request.json()) as ThoughtUpdateRequest
     const thoughtId = parseInt(params.id)
     
     console.log('🎯 PUT /api/thoughts/' + thoughtId + ' called with:', { content, tags, priority, status })
     
-    // Validate required fields
-    if (!content) {
-      return NextResponse.json(
-        { error: 'Content is required' },
-        { status: 400 }
-      )
-    }
+    // Allow empty content; no validation here
     
     // Update the thought in the database with all provided fields
     const updatedThought = await updateThought(thoughtId, { 
-      content,                    // The new text content
+      content: content ?? '',     // Allow empty content
       tags,                       // Array of tag strings
       priority,                   // Priority level (low/medium/high)
       status,                     // Status (pending/in_progress/completed)
       aiGenerated,                // Whether AI generated this thought
       confidence,                 // AI confidence score (0.0 to 1.0)
-      metadata                    // Additional metadata object
+      metadata: (metadata as any) // Additional metadata object
     })
     
     console.log('✅ Updated thought:', thoughtId)
@@ -106,18 +102,18 @@ export async function PUT(
       thought: {
         id: updatedThought.id,
         content: updatedThought.content,      // API uses 'content' (database field)
-        section: updatedThought.section,      // Database and frontend both use 'section'
+        section: updatedThought.section as Section,      // Normalize to Section type
         order: updatedThought.position || 0,  // Map database 'position' -> frontend 'order'
         
         // Metadata and organization fields
-        tags: updatedThought.tags || [],
-        priority: updatedThought.priority,
-        status: updatedThought.status,
+        tags: Array.isArray(updatedThought.tags) ? (updatedThought.tags as string[]) : [],
+        priority: updatedThought.priority ?? undefined,
+        status: updatedThought.status ?? undefined,
         
         // AI and collaboration fields
         aiGenerated: updatedThought.aiGenerated || false,
-        confidence: updatedThought.confidence,
-        metadata: updatedThought.metadata,
+        confidence: updatedThought.confidence ?? undefined,
+        metadata: (updatedThought.metadata as unknown as Record<string, unknown>) ?? undefined,
         
         // Timestamps
         createdAt: updatedThought.createdAt,
@@ -162,6 +158,7 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    await requireSession()
     const thoughtId = parseInt(params.id)
     
     console.log('🎯 DELETE /api/thoughts/' + thoughtId + ' called')

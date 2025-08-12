@@ -12,6 +12,7 @@ import {
 import { GapsBox } from './gaps-box'
 import { GapsItemComponent } from './gaps-item'
 import { api, routes, getApiErrorMessage } from '@/lib/api'
+import { getBrowserSupabase, ensureBrowserSupabaseSession } from '@/lib/supabase-browser'
 import type { ThoughtResponse } from '@/lib/types'
 
 
@@ -93,6 +94,16 @@ export const GapsCanvas = () => {
   const [titleClickPosition, setTitleClickPosition] = useState<number | null>(null)  // Cursor position for title editing
   const [isDragging, setIsDragging] = useState(false)                     // Global drag state
   const [isThinking, setIsThinking] = useState(false)                     // AI processing overlay
+  const [isAddingSection, setIsAddingSection] = useState<GapsSection | null>(null) // Prevent rapid double-adds
+  const [isMoving, setIsMoving] = useState(false) // Serialize moves to avoid race snap-back
+  const [pendingEdits, setPendingEdits] = useState<Record<string, string>>({})
+  const editingItemIdRef = React.useRef<string | null>(null)
+  const isMovingRef = React.useRef(false)
+  // Track server IDs of thoughts we just created in this tab to avoid
+  // double-applying the realtime INSERT that arrives shortly after
+  const recentCreatedRealIdsRef = React.useRef<Set<string>>(new Set())
+  React.useEffect(() => { editingItemIdRef.current = editingItemId }, [editingItemId])
+  React.useEffect(() => { isMovingRef.current = isMoving }, [isMoving])
 
   // DOM References - for programmatic access to elements
   const titleInputRef = React.useRef<HTMLInputElement>(null)  // Main title input field
@@ -147,6 +158,118 @@ export const GapsCanvas = () => {
   React.useEffect(() => {
     loadDiagramFromAPI()
   }, [])
+
+  // Realtime subscriptions for thoughts on the current board
+  React.useEffect(() => {
+    // Wait until we have a real board id
+    if (!diagram?.id || diagram.id === 'loading') return
+
+    let channel: any
+    ;(async () => {
+      // Ensure browser client has a session for Realtime auth before subscribing
+      await ensureBrowserSupabaseSession().catch(() => {})
+      const supabase = getBrowserSupabase()
+      const boardIdNum = Number(diagram.id)
+      console.log('[realtime] subscribing thoughts for board_id=', boardIdNum)
+      channel = supabase
+        .channel(`board-${diagram.id}`)
+        // Scoped realtime for this board
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'thoughts',
+          filter: `board_id=eq.${boardIdNum}`,
+        }, (payload: any) => {
+          const eventType = payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE'
+          const row = (eventType === 'DELETE' ? payload.old : payload.new) as any
+          const thoughtId = String(row?.id ?? '')
+          if (!thoughtId) return
+
+          // Avoid clobbering active local edits or in-flight moves
+          if (editingItemIdRef.current && thoughtId === editingItemIdRef.current) return
+          if (isMovingRef.current) return
+          // Ignore INSERT events for thoughts we just created locally; our
+          // local swap (temp -> real id) has already updated state
+          if (eventType === 'INSERT' && recentCreatedRealIdsRef.current.has(thoughtId)) return
+
+          setDiagram((prev) => {
+            let nextItems = [...prev.items]
+            if (eventType === 'INSERT') {
+              const exists = nextItems.some((i) => i.id === thoughtId)
+              const newItem = {
+                id: thoughtId,
+                text: String(row?.content ?? ''),
+                section: String(row?.section ?? 'status') as GapsSection,
+                order: Number(row?.position ?? 0),
+                createdAt: new Date(row?.created_at ?? Date.now()),
+                updatedAt: new Date(row?.updated_at ?? Date.now()),
+              }
+              nextItems = exists
+                ? nextItems.map((i) => (i.id === thoughtId ? newItem : i))
+                : [...nextItems, newItem]
+              // Dedupe by id defensively (guards against racey temp->real swaps)
+              const seen = new Set<string>()
+              nextItems = nextItems.filter((i) => {
+                if (seen.has(i.id)) return false
+                seen.add(i.id)
+                return true
+              })
+              return { ...prev, items: reindexOrdersBySection(nextItems), updatedAt: new Date(), version: prev.version + 1 }
+            }
+
+            if (eventType === 'UPDATE') {
+              nextItems = nextItems.map((i) =>
+                i.id === thoughtId
+                  ? {
+                      ...i,
+                      text: String(row?.content ?? i.text),
+                      section: String(row?.section ?? i.section) as GapsSection,
+                      order: Number(row?.position ?? i.order),
+                      updatedAt: new Date(row?.updated_at ?? i.updatedAt),
+                    }
+                  : i
+              )
+              return { ...prev, items: reindexOrdersBySection(nextItems), updatedAt: new Date(), version: prev.version + 1 }
+            }
+
+            if (eventType === 'DELETE') {
+              nextItems = nextItems.filter((i) => i.id !== thoughtId)
+              return { ...prev, items: reindexOrdersBySection(nextItems), updatedAt: new Date(), version: prev.version + 1 }
+            }
+
+            return prev
+        })
+        })
+        // Diagnostic: listen to any thoughts change (no state change, logs only)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'thoughts',
+        }, (payload: any) => {
+          try {
+            console.log('[realtime][diag] thoughts ANY event:', payload?.eventType, payload)
+          } catch {}
+        })
+        // Board title updates (filter to this board)
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'boards',
+          filter: `id=eq.${diagram.id}`,
+        }, (payload: any) => {
+          const row = payload.new as any
+          const newTitle = String(row?.title ?? '')
+          setDiagram((prev) => ({ ...prev, title: newTitle, updatedAt: new Date(), version: prev.version + 1 }))
+        })
+        .subscribe((status) => {
+          console.log('[realtime] channel status:', status)
+        })
+    })()
+
+    return () => {
+      try { channel?.unsubscribe() } catch {}
+    }
+  }, [diagram.id])
 
   // Set cursor position when title input becomes active
   React.useEffect(() => {
@@ -532,47 +655,61 @@ export const GapsCanvas = () => {
     }
   }
 
+  // Utility: deterministically re-index orders per section (keeps local state stable)
+  const reindexOrdersBySection = (items: GapsItem[]): GapsItem[] => {
+    const sections: GapsSection[] = ['status', 'goal', 'analysis', 'plan']
+    let nextItems = items
+    sections.forEach((section) => {
+      const sectionItems = nextItems
+        .filter((i) => i.section === section)
+        .sort((a, b) => a.order - b.order)
+      sectionItems.forEach((item, index) => {
+        const ref = nextItems.find((i) => i.id === item.id)
+        if (ref) ref.order = index
+      })
+    })
+    return nextItems
+  }
+
   // Item management functions
   const handleAddItem = async (section: GapsSection) => {
     console.log('🎯 ADD ITEM TRIGGERED for section:', section)
     
     try {
-      // Call granular API to add thought
-      const result = await api.post<ThoughtResponse>(
-        routes.thoughts,
-        { content: 'New thought', section }
-      )
-      console.log('✅ Created thought via API:', result.thought.id)
-      
-      // Add to local state with real database ID
-      const newItem: GapsItem = {
-        id: String(result.thought.id),
-        text: result.thought.content,
-        section: result.thought.section,
-        order: result.thought.order,
-        createdAt: new Date(result.thought.createdAt as any),
-        updatedAt: new Date(result.thought.updatedAt as any)
-      }
-      
-      setDiagram(prev => ({
-        ...prev,
-        items: [...prev.items, newItem].sort((a, b) => {
-          // Sort by section first, then by order within section
-          if (a.section !== b.section) {
-            const sectionOrder = ['status', 'goal', 'analysis', 'plan']
-            return sectionOrder.indexOf(a.section) - sectionOrder.indexOf(b.section)
-          }
-          return a.order - b.order
-        }),
+      if (isAddingSection) return
+      setIsAddingSection(section)
+
+      // 1) Optimistic insert (local only until first save)
+      const tempId = `temp-${Date.now()}`
+      const sectionItems = getItemsBySection(diagram.items, section)
+      const optimisticItem: GapsItem = {
+        id: tempId,
+        text: 'New thought',
+        section,
+        order: sectionItems.length,
+        createdAt: new Date(),
         updatedAt: new Date(),
-        version: prev.version + 1
+      }
+      setDiagram((prev) => ({
+        ...prev,
+        items: reindexOrdersBySection([...prev.items, optimisticItem]),
+        updatedAt: new Date(),
+        version: prev.version + 1,
       }))
-      
-      // Automatically start editing the new item
-      setEditingItemId(newItem.id)
+      setEditingItemId(tempId)
       setEditText('New thought')
     } catch (error) {
       console.error('❌ Error creating thought:', getApiErrorMessage(error))
+      // Rollback optimistic insert if any
+      setDiagram((prev) => ({
+        ...prev,
+        items: prev.items.filter((i) => !String(i.id).startsWith('temp-')),
+        updatedAt: new Date(),
+        version: prev.version + 1,
+      }))
+    }
+    finally {
+      setIsAddingSection(null)
     }
   }
 
@@ -601,14 +738,69 @@ export const GapsCanvas = () => {
     setEditText(item.text)
   }
 
-  const handleSaveEdit = async (itemId: string) => {
-    console.log('🎯 SAVE EDIT TRIGGERED for item:', itemId, 'with text:', editText)
+  const handleSaveEdit = async (itemId: string, finalText?: string) => {
+    const textToSave = finalText ?? editText
+    console.log('🎯 SAVE EDIT TRIGGERED for item:', itemId, 'with text:', textToSave)
     
     try {
+      // If id is not numeric and not a temp id, refresh to sync real ids from server
+      const isNumericId = /^\d+$/.test(String(itemId))
+      if (!isNumericId && !String(itemId).startsWith('temp-')) {
+        await loadDiagramFromAPI()
+        return
+      }
+      const isTemp = String(itemId).startsWith('temp-')
+        // If the item is a temporary optimistic ID, create it now with the final text
+      if (isTemp) {
+        // Find section/order from local state
+        const localItem = diagram.items.find((i) => i.id === itemId)
+        const section = localItem?.section ?? 'status'
+        const result = await api.post<ThoughtResponse>(routes.thoughts, {
+          content: textToSave ?? '',
+          section,
+        })
+        // Swap temp id → real id
+        setDiagram((prev) => ({
+          ...prev,
+            items: (() => {
+              const realId = String(result.thought.id)
+              const mapped = prev.items.map((i) =>
+                i.id === itemId
+                  ? {
+                      id: realId,
+                      text: textToSave ?? '',
+                      section: result.thought.section as GapsSection,
+                      order: result.thought.order,
+                      createdAt: new Date(result.thought.createdAt as any),
+                      updatedAt: new Date(result.thought.updatedAt as any),
+                    }
+                  : i
+              )
+              // Dedupe by id after swap in case INSERT arrived first
+              const seen = new Set<string>()
+              return mapped.filter((i) => {
+                if (seen.has(i.id)) return false
+                seen.add(i.id)
+                return true
+              })
+            })(),
+          updatedAt: new Date(),
+          version: prev.version + 1,
+        }))
+          // Mark this id as recently created to ignore its INSERT echo
+          const createdId = String(result.thought.id)
+          recentCreatedRealIdsRef.current.add(createdId)
+          setTimeout(() => {
+            try { recentCreatedRealIdsRef.current.delete(createdId) } catch {}
+          }, 2000)
+        setEditingItemId(null)
+        setEditText('')
+        return
+      }
       // Call granular API to update thought content
       const result = await api.put<ThoughtResponse>(
         routes.thoughtById(String(itemId)),
-        { content: editText }
+        { content: textToSave ?? '' }
       )
         console.log('✅ Updated thought via API:', itemId)
         
@@ -617,7 +809,7 @@ export const GapsCanvas = () => {
           ...prev,
           items: prev.items.map(item => 
             item.id === itemId 
-              ? { ...item, text: editText, updatedAt: new Date(result.thought.updatedAt as any) }
+              ? { ...item, text: textToSave ?? '', updatedAt: new Date(result.thought.updatedAt as any) }
               : item
           ),
           updatedAt: new Date(),
@@ -731,6 +923,7 @@ export const GapsCanvas = () => {
 
   // Drag and drop handlers
   const handleDragStart = (e: React.DragEvent, item: GapsItem) => {
+    editingItemIdRef.current = editingItemId
     const sectionItems = getItemsBySection(diagram.items, item.section)
     const sourceIndex = sectionItems.findIndex(sectionItem => sectionItem.id === item.id)
     
@@ -868,15 +1061,47 @@ export const GapsCanvas = () => {
         }
       })
       
-      // Call granular API to move thought
+      // Call granular API to move thought and reconcile deterministically
       try {
-        await api.patch<void>(routes.thoughtMove(String(dragData.itemId)), {
-          targetSection: targetSection, 
-          targetIndex: targetIndex 
-        })
+        if (isMoving) return
+        setIsMoving(true)
+        isMovingRef.current = true
+        // If id is not numeric (e.g., from legacy local-only ids), resync first
+        const isNumericId = /^\d+$/.test(String(dragData.itemId))
+        if (!isNumericId) {
+          await loadDiagramFromAPI()
+          return
+        }
+        const result = await api.patch<ThoughtResponse>(
+          routes.thoughtMove(String(dragData.itemId)),
+          { targetSection, targetIndex }
+        )
         console.log('✅ Moved thought via API:', dragData.itemId)
+
+        // Reconcile moved thought with server response and reindex orders
+        setDiagram((prev) => {
+          const mapped = prev.items.map((i) =>
+            i.id === String(result.thought.id)
+              ? {
+                  ...i,
+                  section: result.thought.section as GapsSection,
+                  order: result.thought.order,
+                  updatedAt: new Date(result.thought.updatedAt as any),
+                }
+              : i
+          )
+          return {
+            ...prev,
+            items: reindexOrdersBySection(mapped),
+            updatedAt: new Date(),
+            version: prev.version + 1,
+          }
+        })
       } catch (error) {
         console.error('❌ Error moving thought:', getApiErrorMessage(error))
+      } finally {
+        setIsMoving(false)
+        isMovingRef.current = false
       }
     } catch (error) {
       console.error('Error parsing drag data:', getApiErrorMessage(error))
@@ -1238,7 +1463,7 @@ export const GapsCanvas = () => {
                         isEditing={editingItemId === item.id}
                         editText={editText}
                         onStartEdit={() => handleStartEdit(item)}
-                        onSaveEdit={() => handleSaveEdit(item.id)}
+                        onSaveEdit={(text) => handleSaveEdit(item.id, text)}
                         onCancelEdit={handleCancelEdit}
                         onEditTextChange={setEditText}
                         onRemove={() => handleRemoveItem(item.id)}
@@ -1295,7 +1520,7 @@ export const GapsCanvas = () => {
                         isEditing={editingItemId === item.id}
                         editText={editText}
                         onStartEdit={() => handleStartEdit(item)}
-                        onSaveEdit={() => handleSaveEdit(item.id)}
+                        onSaveEdit={(text) => handleSaveEdit(item.id, text)}
                         onCancelEdit={handleCancelEdit}
                         onEditTextChange={setEditText}
                         onRemove={() => handleRemoveItem(item.id)}
@@ -1352,7 +1577,7 @@ export const GapsCanvas = () => {
                         isEditing={editingItemId === item.id}
                         editText={editText}
                         onStartEdit={() => handleStartEdit(item)}
-                        onSaveEdit={() => handleSaveEdit(item.id)}
+                        onSaveEdit={(text) => handleSaveEdit(item.id, text)}
                         onCancelEdit={handleCancelEdit}
                         onEditTextChange={setEditText}
                         onRemove={() => handleRemoveItem(item.id)}
@@ -1409,7 +1634,7 @@ export const GapsCanvas = () => {
                         isEditing={editingItemId === item.id}
                         editText={editText}
                         onStartEdit={() => handleStartEdit(item)}
-                        onSaveEdit={() => handleSaveEdit(item.id)}
+                        onSaveEdit={(text) => handleSaveEdit(item.id, text)}
                         onCancelEdit={handleCancelEdit}
                         onEditTextChange={setEditText}
                         onRemove={() => handleRemoveItem(item.id)}

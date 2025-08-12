@@ -15,8 +15,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { moveThought } from '@/lib/database'
+import { requireSession } from '@/lib/auth'
 import { logActivity } from '@/lib/activity'
-import type { ThoughtMoveRequest, ThoughtResponse } from '@/lib/types'
+import type { ThoughtMoveRequest, ThoughtResponse, Section } from '@/lib/types'
 
 /**
  * PATCH /api/thoughts/[id]/move - Move thought and adjust other positions
@@ -67,6 +68,7 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    await requireSession()
     // Extract move parameters from request body
     const { targetSection, targetIndex } = (await request.json()) as ThoughtMoveRequest
     const thoughtId = parseInt(params.id)
@@ -111,18 +113,18 @@ export async function PATCH(
       thought: {
         id: updatedThought.id,
         content: updatedThought.content,      // API uses 'content' (database field)
-        section: updatedThought.section,      // Database and frontend both use 'section'
+        section: updatedThought.section as Section,      // Normalize to Section type
         order: updatedThought.position || 0,  // Map database 'position' -> frontend 'order'
         
         // Metadata and organization fields
-        tags: updatedThought.tags || [],
-        priority: updatedThought.priority,
-        status: updatedThought.status,
+        tags: Array.isArray(updatedThought.tags) ? (updatedThought.tags as string[]) : [],
+        priority: updatedThought.priority ?? undefined,
+        status: updatedThought.status ?? undefined,
         
         // AI and collaboration fields
         aiGenerated: updatedThought.aiGenerated || false,
-        confidence: updatedThought.confidence,
-        metadata: updatedThought.metadata,
+        confidence: updatedThought.confidence ?? undefined,
+        metadata: (updatedThought.metadata as unknown as Record<string, unknown>) ?? undefined,
         
         // Timestamps
         createdAt: updatedThought.createdAt,

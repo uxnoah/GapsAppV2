@@ -1,35 +1,14 @@
-"use client"
-import { getBrowserSupabase } from '@/lib/supabase-client'
+import ClientLogin from './client-login'
+import { getServerSupabase } from '@/lib/supabase-server'
+import { redirect } from 'next/navigation'
 
-const LoginPage = () => {
-  const supabase = getBrowserSupabase()
-
-  const handleSignIn = async (provider: 'google' | 'github') => {
-    await supabase.auth.signInWithOAuth({
-      provider,
-      options: { redirectTo: `${window.location.origin}` },
-    })
+export default async function LoginPage() {
+  const supabase = getServerSupabase()
+  const { data } = await supabase.auth.getUser()
+  if (data?.user) {
+    redirect('/')
   }
-
-  return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 p-6">
-      <h1 className="text-2xl font-semibold">Sign in</h1>
-      <button
-        className="w-full rounded-md bg-black px-4 py-2 text-white hover:bg-gray-800"
-        onClick={() => handleSignIn('google')}
-      >
-        Continue with Google
-      </button>
-      <button
-        className="w-full rounded-md bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
-        onClick={() => handleSignIn('github')}
-      >
-        Continue with GitHub
-      </button>
-    </main>
-  )
+  return <ClientLogin />
 }
-
-export default LoginPage
 
 

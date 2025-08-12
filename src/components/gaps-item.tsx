@@ -9,7 +9,7 @@ interface GapsItemProps {
   isEditing: boolean
   editText: string
   onStartEdit: () => void
-  onSaveEdit: () => void
+  onSaveEdit: (text: string) => void
   onCancelEdit: () => void
   onEditTextChange: (text: string) => void
   onRemove: () => void
@@ -41,7 +41,7 @@ export const GapsItemComponent: React.FC<GapsItemProps> = ({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
-      onSaveEdit()
+      onSaveEdit(editText)
     } else if (e.key === 'Escape') {
       onCancelEdit()
     }
@@ -146,17 +146,17 @@ export const GapsItemComponent: React.FC<GapsItemProps> = ({
             ref={inputRef}
             value={editText}
             onChange={(e) => onEditTextChange(e.target.value)}
-            onBlur={onSaveEdit}
+            onBlur={() => onSaveEdit(editText)}
             onKeyDown={handleKeyDown}
             autoFocus
-            className="flex-1 bg-transparent border-none outline-none text-sm text-gray-900"
+            className="flex-1 bg-transparent border-none outline-none text-sm text-gray-900 min-h-8"
             aria-label="Edit item text"
           />
         ) : (
           <span 
             ref={spanRef}
             onClick={handleSpanClick}
-            className="flex-1 cursor-move text-sm select-none text-gray-900"
+            className="flex-1 cursor-move text-sm select-none text-gray-900 min-h-8 flex items-center"
             tabIndex={0}
             role="button"
             aria-label="Click to edit item"
